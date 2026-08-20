@@ -1,0 +1,9 @@
+LangChain 为大模型应用提供统一的组件接口。在这个项目中，它不是用来替代 FastAPI，而是负责组织 RAG 内部流程。FastAPI 仍然负责接收 HTTP 请求、校验 question、调用 ask 函数并返回 JSON；LangChain 则负责文本切分、Document 表示、Embedding 接口、向量数据库连接、Prompt 模板、聊天模型调用和输出解析。两者属于不同层次，可以在同一个应用中配合使用。
+
+RecursiveCharacterTextSplitter 用于把长文本切成适合检索的片段。CHUNK_SIZE 决定每个片段允许包含的最大字符数，CHUNK_OVERLAP 决定相邻片段之间保留多少重复内容。例如大小为 500、重叠为 80 时，每个片段最多约 500 个字符，并尽量在段落、换行或空格等自然边界处分割。重叠能够减少一句话刚好位于切分边界时造成的语义丢失，但重叠过大会增加向量数量、存储空间和重复检索结果。
+
+LangChain 的 Document 包含 page_content 和 metadata。page_content 是需要向量化和检索的正文，metadata 是不参与正文生成但需要随结果保留的结构化信息。本项目使用 source 记录来源文件，使用 chunk_index 记录片段序号。多文件导入时，ingest.py 会递归读取 knowledge 目录下所有扩展名为 txt 的文件，为每个文件分别切片，并把来源信息写入每个 Document。
+
+QdrantVectorStore.from_documents 会接收 Document 列表和 OllamaEmbeddings。它在内部批量生成文档向量，创建或重建 Collection，然后写入向量、page_content 和 metadata。检索阶段使用 similarity_search_with_score，LangChain 会把问题交给 embed_query，再把问题向量发送给 Qdrant。返回结果是 Document 与 score 的组合，应用将其转换为自己的 SearchHit，以保持 FastAPI 响应结构简单清晰。
+
+生成阶段使用 ChatPromptTemplate、ChatOllama 和 StrOutputParser。ChatPromptTemplate 把 system 规则、检索到的 context 和 question 组合成聊天消息；ChatOllama 调用本地 qwen 模型；StrOutputParser 从 AIMessage 中取出普通字符串。表达式 prompt、model 和 parser 之间使用竖线连接，这种写法叫 LCEL Chain，表示前一个组件的输出依次传给下一个组件。真正的增强内容是检索到的 hit.text，Reference 标签主要负责分隔片段和标记回答依据。

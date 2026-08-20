@@ -1,0 +1,9 @@
+Qdrant 是一个面向向量相似度搜索的数据库。在 RAG 系统中，它通常负责保存知识片段的向量、原始文本和元数据。向量本身是一组浮点数，用来表示文本在语义空间中的位置；原始文本用于检索后提供给聊天模型；元数据则可以记录来源文件、片段编号、文档类型和更新时间等信息。将这些内容放在同一个 Point 中，可以让应用在找到相似向量后，同时取回生成答案所需的参考资料。
+
+Collection 可以理解成关系型数据库中的表，但它针对向量数据设计。创建 Collection 时必须指定向量维度和距离计算方式。本项目使用 bge-m3，因此向量维度是 1024，并使用 Cosine 余弦相似度。一个 Collection 中同一个向量字段的维度必须保持一致。如果更换为输出不同维度的 Embedding 模型，就必须重新生成全部知识向量并重建 Collection，不能把 768 维和 1024 维向量混合写入同一个字段。
+
+导入知识时，LangChain 的 QdrantVectorStore 会读取 Document.page_content，调用 OllamaEmbeddings 生成向量，然后把向量和 Document.metadata 一起写入 Qdrant。本项目在 metadata 中保存 source 和 chunk_index。source 表示片段来自哪个知识文件，chunk_index 表示它是该文件切分后的第几个片段。查询时，similarity_search_with_score 会先把用户问题转换成向量，再由 Qdrant 与 Collection 中的知识向量进行相似度比较。
+
+TOP_K 决定最多召回多少个候选片段，SCORE_THRESHOLD 决定片段至少达到多少相似度才能返回。例如 TOP_K 为 3、SCORE_THRESHOLD 为 0.5，表示最多返回三个并且分数不低于 0.5 的片段。TOP_K 只控制数量，不保证结果一定相关；阈值用于排除低相关内容，但阈值过高也可能过滤掉有用资料。因此，阈值应该根据实际问题、知识库和 Embedding 模型的测试结果进行调整。
+
+Qdrant 的 Dashboard 可以查看 Collection、Point 数量、向量配置和 payload。为了减少传输量，普通检索通常只返回 payload 和 score，不返回完整的 1024 维向量。这不代表向量没有保存；只有在查询参数中明确要求 with_vector 时，Qdrant 才会把完整向量返回给调用方。生产环境中还需要考虑持久化、备份、访问控制、监控和 Collection 的版本管理。

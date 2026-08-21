@@ -9,7 +9,8 @@ knowledge/*.txt（多个文件）
   → QdrantVectorStore 保存向量
 
 用户问题
-  → QdrantVectorStore 返回相似 Document
+  → QdrantVectorStore 召回候选 Document
+  → bge-reranker-base 对候选结果重新排序
   → ChatPromptTemplate 注入参考资料
   → ChatOllama（qwen3.5:4b）根据资料回答
 ```
@@ -48,9 +49,12 @@ uv run python ingest.py
 CHUNK_SIZE=500
 CHUNK_OVERLAP=80
 SCORE_THRESHOLD=0.5
+RETRIEVAL_K=10
+TOP_K=3
+RERANKER_MODEL=BAAI/bge-reranker-base
 ```
 
-修改分块参数或知识文件后，需要重新执行导入命令。`SCORE_THRESHOLD` 是查询时允许返回的最低相似度分数，不需要重新导入。
+修改分块参数或知识文件后，需要重新执行导入命令。查询先按 `SCORE_THRESHOLD` 从 Qdrant 召回最多 `RETRIEVAL_K` 条，再由 Reranker 重新评分并保留 `TOP_K` 条。首次查询会下载约 1 GB 的 Reranker 模型到 `.models/`。
 
 ## 3. 启动 API
 
@@ -68,7 +72,7 @@ uv run uvicorn main:app --reload --port 8001
 }
 ```
 
-响应中会同时显示最终答案、Qdrant 返回的原始片段、相似度和来源文件。低于 `SCORE_THRESHOLD` 的片段不会进入 Prompt。
+响应中会同时显示最终答案、来源文件、Qdrant 的 `vector_score` 和重排后的 `rerank_score`。低于 `SCORE_THRESHOLD` 的片段不会进入重排阶段。
 
 ## 4. VS Code Debug
 

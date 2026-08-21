@@ -3,4 +3,6 @@
 .uv-cache/
 __pycache__/
 .pytest_cache/
+.models/
+.cache/
 *.pyc

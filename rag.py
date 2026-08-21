@@ -1,7 +1,10 @@
 """The LangChain RAG pipeline: split, index, retrieve, augment, generate."""
 
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
+from fastembed.rerank.cross_encoder import TextCrossEncoder
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -17,6 +20,8 @@ from config import (
     EMBEDDING_MODEL,
     OLLAMA_URL,
     QDRANT_URL,
+    RERANKER_MODEL,
+    RETRIEVAL_K,
     SCORE_THRESHOLD,
     TOP_K,
 )
@@ -64,7 +69,8 @@ def rebuild_index(documents: list[Document]) -> int:
 @dataclass
 class SearchHit:
     text: str
-    score: float
+    vector_score: float
+    rerank_score: float
     chunk_index: int
     source: str
 
@@ -78,21 +84,43 @@ def vector_store() -> QdrantVectorStore:
     )
 
 
+@lru_cache(maxsize=1)
+def reranker() -> TextCrossEncoder:
+    """Load and cache the local cross-encoder reranker."""
+    cache_dir = Path(__file__).with_name(".models")
+    return TextCrossEncoder(model_name=RERANKER_MODEL, cache_dir=str(cache_dir))
+
+
 def retrieve(question: str) -> list[SearchHit]:
-    """Retrieve similar LangChain Documents from Qdrant."""
+    """Retrieve candidates from Qdrant, then rerank them with a cross-encoder."""
     documents_with_scores = vector_store().similarity_search_with_score(
         query=question,
-        k=TOP_K,
+        k=RETRIEVAL_K,
         score_threshold=SCORE_THRESHOLD,
     )
+    if not documents_with_scores:
+        return []
+
+    rerank_scores = list(
+        reranker().rerank(
+            question,
+            [document.page_content for document, _ in documents_with_scores],
+        )
+    )
+    ranked_results = sorted(
+        zip(documents_with_scores, rerank_scores, strict=True),
+        key=lambda result: result[1],
+        reverse=True,
+    )[:TOP_K]
     return [
         SearchHit(
             text=document.page_content,
-            score=float(score),
+            vector_score=float(vector_score),
+            rerank_score=float(rerank_score),
             chunk_index=int(document.metadata.get("chunk_index", 0)),
             source=str(document.metadata.get("source", "unknown")),
         )
-        for document, score in documents_with_scores
+        for (document, vector_score), rerank_score in ranked_results
     ]
 
 

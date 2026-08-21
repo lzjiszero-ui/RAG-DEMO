@@ -16,7 +16,8 @@ class AskRequest(BaseModel):
 
 class Source(BaseModel):
     text: str
-    score: float
+    vector_score: float
+    rerank_score: float
     chunk_index: int
     source: str
 

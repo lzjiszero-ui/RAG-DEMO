@@ -1,0 +1,38 @@
+[
+  {
+    "question": "LangChain 中的 Document 包含什么？",
+    "expected_source": "langchain_rag_guide.txt"
+  },
+  {
+    "question": "Qdrant 中的 Collection 是什么？",
+    "expected_source": "qdrant_guide.txt"
+  },
+  {
+    "question": "Ollama 第一次接收请求为什么比较慢？",
+    "expected_source": "ollama_guide.txt"
+  },
+  {
+    "question": "RAG 的离线索引和在线问答有什么区别？",
+    "expected_source": "rag_basics.txt"
+  },
+  {
+    "question": "TOP_K 和 SCORE_THRESHOLD 分别控制什么？",
+    "expected_source": "qdrant_guide.txt"
+  },
+  {
+    "question": "RecursiveCharacterTextSplitter 如何切分文本？",
+    "expected_source": "langchain_rag_guide.txt"
+  },
+  {
+    "question": "Embedding 模型和聊天模型的职责有什么区别？",
+    "expected_source": "rag_basics.txt"
+  },
+  {
+    "question": "ChatOllama 在这个项目中负责什么？",
+    "expected_source": "ollama_guide.txt"
+  },
+  {
+    "question": "模型下载和模型加载有什么区别？",
+    "expected_source": "ollama_guide.txt"
+  }
+]

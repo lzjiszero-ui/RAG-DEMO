@@ -23,12 +23,47 @@ def test_load_documents_keeps_source_and_chunk_index(tmp_path: Path) -> None:
 
 
 def test_ask_does_not_call_model_when_nothing_passes_threshold(monkeypatch) -> None:
-    monkeypatch.setattr("rag.retrieve", lambda question: [])
+    monkeypatch.setattr(rag, "rewrite_query", lambda question: "rewritten question")
+    monkeypatch.setattr(rag, "retrieve_candidates", lambda question: [])
 
-    answer, hits = ask("unrelated question")
+    answer, hits, rewritten_query = ask("unrelated question")
 
     assert answer == "知识库中没有找到足够相关的资料。"
     assert hits == []
+    assert rewritten_query == "rewritten question"
+
+
+def test_rewrite_query_returns_model_output(monkeypatch) -> None:
+    class FakeChain:
+        def __or__(self, other):
+            return self
+
+        def invoke(self, values):
+            assert values == {"question": "它用什么模型？", "chat_history": "（无历史对话）"}
+            return "“项目使用 bge-m3 Embedding 模型生成向量”"
+
+    fake_chain = FakeChain()
+    monkeypatch.setattr(rag.ChatPromptTemplate, "from_messages", lambda messages: fake_chain)
+    monkeypatch.setattr(rag, "ChatOllama", lambda **kwargs: fake_chain)
+    monkeypatch.setattr(rag, "StrOutputParser", lambda: fake_chain)
+
+    assert rag.rewrite_query("它用什么模型？") == "项目使用 bge-m3 Embedding 模型生成向量"
+
+
+def test_rewrite_query_falls_back_when_model_fails(monkeypatch) -> None:
+    class FailingChain:
+        def __or__(self, other):
+            return self
+
+        def invoke(self, values):
+            raise RuntimeError("Ollama unavailable")
+
+    failing_chain = FailingChain()
+    monkeypatch.setattr(rag.ChatPromptTemplate, "from_messages", lambda messages: failing_chain)
+    monkeypatch.setattr(rag, "ChatOllama", lambda **kwargs: failing_chain)
+    monkeypatch.setattr(rag, "StrOutputParser", lambda: failing_chain)
+
+    assert rag.rewrite_query("原始问题") == "原始问题"
 
 
 def test_retrieve_sorts_candidates_by_reranker_score(monkeypatch) -> None:

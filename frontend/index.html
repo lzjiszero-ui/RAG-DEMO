@@ -1,0 +1,132 @@
+<!doctype html>
+<!-- 页面使用简体中文。 -->
+<html lang="zh-CN">
+  <head>
+    <!-- 使用 UTF-8，确保中文正常显示。 -->
+    <meta charset="utf-8" />
+    <!-- 让页面在手机和平板上按真实宽度响应式布局。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- 为浏览器和搜索工具提供页面用途说明。 -->
+    <meta name="description" content="本地 LangChain RAG 问答与检索评估控制台" />
+    <!-- 设置浏览器标签页标题。 -->
+    <title>RAG Lab · 本地知识问答</title>
+    <!-- 加载页面样式。 -->
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <!-- 两个模糊色块只负责背景氛围，不承载业务信息。 -->
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <!-- 页面主体容器，限制最大宽度并居中。 -->
+    <main class="shell">
+      <!-- 顶栏展示品牌和本地依赖服务状态。 -->
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="RAG Lab 首页">
+          <span class="brand-mark">R</span>
+          <span><strong>RAG Lab</strong><small>LOCAL KNOWLEDGE CONSOLE</small></span>
+        </a>
+        <div class="service-status" id="service-status">
+          <span class="status-dot"></span>
+          <span>正在检查本地服务</span>
+        </div>
+      </header>
+
+      <!-- 首屏标题介绍当前 RAG 技术流程。 -->
+      <section class="hero">
+        <p class="eyebrow">LANGCHAIN · QDRANT · OLLAMA</p>
+        <h1>向你的本地知识库<br /><span>提一个好问题。</span></h1>
+        <p class="hero-copy">问题先经过 Query Rewrite、向量召回和 Cross-Encoder 重排，再由 Qwen 基于引用片段生成回答。</p>
+      </section>
+
+      <!-- 两个标签用于切换问答页和评估页。 -->
+      <nav class="tabs" aria-label="功能导航">
+        <button class="tab is-active" id="qa-tab" type="button">知识问答</button>
+        <button class="tab" id="eval-tab" type="button">检索评估</button>
+      </nav>
+
+      <!-- 知识问答主区域；切换到评估页时通过 hidden 完全隐藏。 -->
+      <section class="workspace" id="qa-view">
+        <!-- 提问表单负责收集问题和触发 /ask。 -->
+        <form class="question-card" id="ask-form">
+          <div class="chat-toolbar"><label for="question">你的问题</label><button id="new-chat" type="button">＋ 新建会话</button></div>
+          <!-- 当前 session_id 已保存的多轮问答显示在这里。 -->
+          <div class="chat-history" id="chat-history"><p class="chat-empty">当前是新会话，提出第一个问题吧。</p></div>
+          <textarea id="question" name="question" maxlength="1000" rows="4" placeholder="例如：LangChain 中的 Document 包含什么？" required></textarea>
+          <div class="form-footer">
+            <div class="suggestions" aria-label="示例问题">
+              <button type="button" data-question="什么模型负责把文本转换成 1024 维向量？">Embedding 模型</button>
+              <button type="button" data-question="Qdrant 中的 Collection 是什么？">Qdrant Collection</button>
+              <button type="button" data-question="Reranker 为什么比向量排序更精确？">Reranker</button>
+            </div>
+            <button class="primary-button" id="ask-button" type="submit"><span>开始检索</span><b>→</b></button>
+          </div>
+        </form>
+
+        <!-- 问答结果面板包含空状态、加载状态和答案状态。 -->
+        <section class="result-panel is-empty" id="result-panel" aria-live="polite">
+          <div class="empty-state" id="empty-state">
+            <span class="empty-index">01</span>
+            <div><h2>等待问题</h2><p>答案、参考来源以及两阶段检索分数会显示在这里。</p></div>
+          </div>
+          <div class="loading-state" id="loading-state" hidden>
+            <div class="progress-panel">
+              <div class="progress-heading"><span class="loader"></span><div><h2>正在查询知识库</h2><p id="progress-message">准备执行 RAG 流程</p></div></div>
+              <!-- 后端流式事件会实时更新以下四个真实处理阶段。 -->
+              <ol class="pipeline" id="pipeline">
+                <li data-step="memory"><span>1</span><div><b>Chat Memory</b><small>等待执行</small></div></li>
+                <li data-step="rewrite"><span>2</span><div><b>Query Rewrite</b><small id="reasoning-status">Reasoning: ON</small></div></li>
+                <li data-step="retrieve"><span>3</span><div><b>Qdrant Retrieval</b><small>等待执行</small></div></li>
+                <li data-step="rerank"><span>4</span><div><b>Cross-Encoder</b><small>等待执行</small></div></li>
+                <li data-step="generate"><span>5</span><div><b>Qwen Generation</b><small>等待执行</small></div></li>
+              </ol>
+            </div>
+          </div>
+          <div class="answer-state" id="answer-state" hidden>
+            <div class="answer-heading"><span>ANSWER</span><div class="answer-stats"><small id="total-time"></small><small id="source-count"></small></div></div>
+            <!-- 显示 Query Rewrite 后实际用于 Qdrant 召回的查询。 -->
+            <div class="rewrite-box"><small>REWRITTEN QUERY</small><p id="rewritten-query"></p></div>
+            <article class="answer" id="answer"></article>
+            <div class="sources-heading"><h3>检索依据</h3><span>VECTOR / RERANK</span></div>
+            <div class="source-list" id="source-list"></div>
+          </div>
+        </section>
+      </section>
+
+      <!-- 检索评估主区域；默认 hidden，点击评估标签后显示。 -->
+      <section class="evaluation-view" id="eval-view" hidden>
+        <!-- 评估功能说明和启动按钮。 -->
+        <div class="eval-intro">
+          <div>
+            <p class="eyebrow">RETRIEVAL BENCHMARK</p>
+            <h2>原始召回、重排与改写，<br />到底差在哪里？</h2>
+            <p>对比原问题直接检索 Qdrant、增加 Cross-Encoder 重排，以及先用 Qwen Query Rewrite 再召回和重排的准确率与耗时。</p>
+          </div>
+          <button class="primary-button eval-button" id="run-evaluation" type="button"><span>运行测试</span><b>↗</b></button>
+        </div>
+
+        <!-- 评估未运行时显示的提示。 -->
+        <div class="eval-empty" id="eval-empty">
+          <span class="empty-index">02</span>
+          <div><h2>等待评估</h2><p>点击运行后将计算 Hit@1、Hit@3、MRR 和平均耗时。</p></div>
+        </div>
+        <!-- 后端逐题评估期间显示的加载状态。 -->
+        <div class="eval-loading" id="eval-loading" hidden>
+          <span class="loader"></span><div><h2>正在运行三条检索管线</h2><p>Query Rewrite 会逐题调用 Qwen，首次评估也会加载 ONNX Reranker。</p></div>
+        </div>
+        <!-- 评估完成后显示汇总指标和逐题排名。 -->
+        <div id="eval-results" hidden>
+          <div class="metric-comparison" id="metric-comparison"></div>
+          <div class="case-heading"><div><span>QUESTION LEVEL</span><h3>逐题排名变化</h3></div><small>排名越小越好，— 表示未命中</small></div>
+          <div class="case-table-wrap">
+            <table class="case-table">
+              <thead><tr><th>测试问题 / 正确来源</th><th>Qdrant</th><th>+ Reranker</th><th>Rewrite + Rerank</th><th>改写查询</th><th>相对原始变化</th><th>完整管线耗时</th></tr></thead>
+              <tbody id="case-list"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+    <!-- defer 确保 HTML 解析完成后再执行前端交互代码。 -->
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

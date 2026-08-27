@@ -119,17 +119,22 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
 .eval-empty, .eval-loading { min-height: 300px; display: flex; align-items: center; justify-content: center; gap: 18px; color: var(--muted); }
 .eval-empty h2, .eval-loading h2 { color: var(--text); margin: 0 0 8px; }
 .eval-empty p, .eval-loading p { margin: 0; font-size: 13px; }
-.metric-comparison { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 24px 0 30px; }
-.method-card { border: 1px solid var(--line); border-radius: 16px; padding: 20px; background: rgba(0,0,0,.14); }
+.metric-comparison { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 24px 0 30px; }
+.method-card { min-width: 0; border: 1px solid var(--line); border-radius: 16px; padding: 20px; background: rgba(0,0,0,.14); }
 .method-card.is-reranker { border-color: rgba(215,255,95,.25); background: linear-gradient(145deg, rgba(215,255,95,.08), rgba(0,0,0,.12)); }
-.method-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
-.method-title strong { font-size: 14px; }
-.method-title span { color: var(--muted); font-size: 10px; letter-spacing: .12em; }
-.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.metric { padding: 12px; border-radius: 10px; background: rgba(255,255,255,.035); }
+.method-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+.method-title strong { flex: 0 0 auto; font-size: 14px; }
+.method-title span { min-width: 0; color: var(--muted); font-size: 10px; line-height: 1.45; letter-spacing: .12em; text-align: right; overflow-wrap: anywhere; }
+.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.metric { min-width: 0; padding: 12px 10px; border-radius: 10px; background: rgba(255,255,255,.035); }
 .metric small, .metric b { display: block; }
 .metric small { color: var(--muted); font-size: 9px; letter-spacing: .1em; margin-bottom: 8px; }
 .metric b { font-size: 21px; letter-spacing: -.03em; }
+
+/* 中等宽度下将三张方法卡纵向排列，避免指标数字被过度压缩。 */
+@media (max-width: 1080px) {
+  .metric-comparison { grid-template-columns: 1fr; }
+}
 .case-heading { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; }
 .case-heading span { color: var(--accent); font-size: 9px; letter-spacing: .16em; }
 .case-heading h3 { margin: 5px 0 0; font-size: 16px; }

@@ -37,6 +37,8 @@ docker compose up -d
 uv sync
 ```
 
+本地实际配置写在 `.env`，该文件已被 Git 忽略。新增环境变量时，必须同时在 `.env.sample` 中添加同名配置键，但等号后保持为空，不要提交本地地址、密码、Token 或其他实际值。
+
 ## 2. 导入知识库
 
 ```powershell

@@ -123,13 +123,18 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
 .eval-empty, .eval-loading { min-height: 300px; display: flex; align-items: center; justify-content: center; gap: 18px; color: var(--muted); }
 .eval-empty h2, .eval-loading h2 { color: var(--text); margin: 0 0 8px; }
 .eval-empty p, .eval-loading p { margin: 0; font-size: 13px; }
-.metric-comparison { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 24px 0 30px; }
+.metric-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 24px 0 30px; }
 .method-card { min-width: 0; border: 1px solid var(--line); border-radius: 16px; padding: 20px; background: rgba(0,0,0,.14); }
 .method-card.is-reranker { border-color: rgba(215,255,95,.25); background: linear-gradient(145deg, rgba(215,255,95,.08), rgba(0,0,0,.12)); }
+.generation-metrics { margin: -14px 0 30px; }
+.generation-card { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; border: 1px solid rgba(115,169,255,.25); border-radius: 14px; padding: 16px; background: rgba(115,169,255,.05); }
+.generation-card div { display: grid; gap: 7px; }
+.generation-card small { color: var(--muted); font-size: 9px; letter-spacing: .12em; }
+.generation-card b { font-size: 20px; }
 .method-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
 .method-title strong { flex: 0 0 auto; font-size: 14px; }
 .method-title span { min-width: 0; color: var(--muted); font-size: 10px; line-height: 1.45; letter-spacing: .12em; text-align: right; overflow-wrap: anywhere; }
-.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
 .metric { min-width: 0; padding: 12px 10px; border-radius: 10px; background: rgba(255,255,255,.035); }
 .metric small, .metric b { display: block; }
 .metric small { color: var(--muted); font-size: 9px; letter-spacing: .1em; margin-bottom: 8px; }

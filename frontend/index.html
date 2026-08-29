@@ -84,7 +84,7 @@
               <ol class="pipeline" id="pipeline">
                 <li data-step="memory"><span>1</span><div><b>Chat Memory</b><small>等待执行</small></div></li>
                 <li data-step="rewrite"><span>2</span><div><b>Query Rewrite</b><small id="reasoning-status">Reasoning: ON</small></div></li>
-                <li data-step="retrieve"><span>3</span><div><b>Qdrant Retrieval</b><small>等待执行</small></div></li>
+                <li data-step="retrieve"><span>3</span><div><b>Hybrid Search</b><small>Dense + BM25 + RRF</small></div></li>
                 <li data-step="rerank"><span>4</span><div><b>Cross-Encoder</b><small>等待执行</small></div></li>
                 <li data-step="generate"><span>5</span><div><b>Qwen Generation</b><small>等待执行</small></div></li>
               </ol>
@@ -95,7 +95,7 @@
             <!-- 显示 Query Rewrite 后实际用于 Qdrant 召回的查询。 -->
             <div class="rewrite-box"><small>REWRITTEN QUERY</small><p id="rewritten-query"></p></div>
             <article class="answer" id="answer"></article>
-            <div class="sources-heading"><h3>检索依据</h3><span>VECTOR / RERANK</span></div>
+            <div class="sources-heading"><h3>检索依据</h3><span>HYBRID RRF / RERANK</span></div>
             <div class="source-list" id="source-list"></div>
           </div>
         </section>
@@ -108,7 +108,7 @@
           <div>
             <p class="eyebrow">RETRIEVAL BENCHMARK</p>
             <h2>原始召回、重排与改写，<br />到底差在哪里？</h2>
-            <p>对比原问题直接检索 Qdrant、增加 Cross-Encoder 重排，以及先用 Qwen Query Rewrite 再召回和重排的准确率与耗时。</p>
+            <p>对比 Dense 向量、Dense + BM25 Hybrid Search、Cross-Encoder 重排，以及 Query Rewrite 完整管线的准确率、排序质量与耗时。</p>
           </div>
           <button class="primary-button eval-button" id="run-evaluation" type="button"><span>运行测试</span><b>↗</b></button>
         </div>
@@ -116,19 +116,20 @@
         <!-- 评估未运行时显示的提示。 -->
         <div class="eval-empty" id="eval-empty">
           <span class="empty-index">02</span>
-          <div><h2>等待评估</h2><p>点击运行后将计算 Hit@1、Hit@3、MRR 和平均耗时。</p></div>
+          <div><h2>等待评估</h2><p>点击运行后将计算 Hit@1/3/5、MRR、nDCG@5 和平均耗时。</p></div>
         </div>
         <!-- 后端逐题评估期间显示的加载状态。 -->
         <div class="eval-loading" id="eval-loading" hidden>
-          <span class="loader"></span><div><h2>正在运行三条检索管线</h2><p>Query Rewrite 会逐题调用 Qwen，首次评估也会加载 ONNX Reranker。</p></div>
+          <span class="loader"></span><div><h2>正在运行四条检索管线</h2><p>评估会比较 Dense、Hybrid、Reranker 与 Query Rewrite；首次运行会加载本地模型。</p></div>
         </div>
         <!-- 评估完成后显示汇总指标和逐题排名。 -->
         <div id="eval-results" hidden>
           <div class="metric-comparison" id="metric-comparison"></div>
+          <div class="generation-metrics" id="generation-metrics"></div>
           <div class="case-heading"><div><span>QUESTION LEVEL</span><h3>逐题排名变化</h3></div><small>排名越小越好，— 表示未命中</small></div>
           <div class="case-table-wrap">
             <table class="case-table">
-              <thead><tr><th>测试问题 / 正确来源</th><th>Qdrant</th><th>+ Reranker</th><th>Rewrite + Rerank</th><th>改写查询</th><th>相对原始变化</th><th>完整管线耗时</th></tr></thead>
+              <thead><tr><th>测试问题 / 正确来源</th><th>Dense</th><th>Hybrid</th><th>+ Reranker</th><th>Rewrite + Rerank</th><th>改写查询</th><th>相对 Dense 变化</th><th>完整管线耗时</th></tr></thead>
               <tbody id="case-list"></tbody>
             </table>
           </div>

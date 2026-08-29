@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 # 导入 Path，用于定位 eval/questions.json。
 from pathlib import Path
+# 导入 log2，用于计算按排名位置折扣的 nDCG@5。
+from math import log2
 # 导入高精度计时器，用于测量检索和重排耗时。
 from time import perf_counter
 # 导入 Any，用于描述包含不同字段类型的结果字典。
@@ -15,7 +17,7 @@ from typing import Any
 from langchain_core.documents import Document
 
 # 导入检索结果类型、改写、重排和 Qdrant 候选召回函数。
-from rag import SearchHit, rerank_candidates, retrieve_candidates, rewrite_query
+from rag import SearchHit, generate, rerank_candidates, retrieve_candidates, retrieve_dense_candidates, rewrite_query
 
 
 # 定位项目默认评估问题文件。
@@ -30,6 +32,10 @@ class EvaluationCase:
     question: str
     # 预期应当命中的知识来源文件。
     expected_source: str
+    # 可选知识分类，用于同时评估 Metadata Filter。
+    category: str = "全部"
+    # 最终回答中应出现的关键答案，用于轻量、可重复的生成正确性评估。
+    expected_answer: str = ""
 
 
 # 定义评估问题加载函数，并允许调用方传入其他 JSON 文件。
@@ -67,8 +73,12 @@ def ranking_metrics(rank: int | None) -> dict[str, float]:
         "hit_at_1": float(rank == 1),
         # 正确来源出现在前三名时记为 1，否则为 0。
         "hit_at_3": float(rank is not None and rank <= 3),
+        # Hit@5 衡量正确来源是否进入更宽的候选集合。
+        "hit_at_5": float(rank is not None and rank <= 5),
         # 未命中记为 0；命中时使用 1/rank。
         "reciprocal_rank": 0.0 if rank is None else 1.0 / rank,
+        # 单一相关来源时，nDCG@5 按排名位置给予对数折扣。
+        "ndcg_at_5": 0.0 if rank is None or rank > 5 else 1.0 / log2(rank + 1),
     }
 
 
@@ -117,15 +127,17 @@ def summarize(results: list[dict[str, Any]], method: str) -> dict[str, float]:
     # 空问题集无法计算平均值，因此返回全零指标。
     if count == 0:
         # 返回与正常摘要相同的字段结构。
-        return {"hit_at_1": 0.0, "hit_at_3": 0.0, "mrr": 0.0, "avg_latency_ms": 0.0}
+        return {"hit_at_1": 0.0, "hit_at_3": 0.0, "hit_at_5": 0.0, "mrr": 0.0, "ndcg_at_5": 0.0, "avg_latency_ms": 0.0}
     # 计算各项指标的算术平均值。
     return {
         # 汇总每题 Hit@1 后除以问题总数。
         "hit_at_1": sum(item[method]["hit_at_1"] for item in results) / count,
         # 汇总每题 Hit@3 后除以问题总数。
         "hit_at_3": sum(item[method]["hit_at_3"] for item in results) / count,
+        "hit_at_5": sum(item[method]["hit_at_5"] for item in results) / count,
         # MRR 是每题 reciprocal_rank 的平均值。
         "mrr": sum(item[method]["reciprocal_rank"] for item in results) / count,
+        "ndcg_at_5": sum(item[method]["ndcg_at_5"] for item in results) / count,
         # 计算该方法处理单个问题的平均毫秒耗时。
         "avg_latency_ms": sum(item[method]["latency_ms"] for item in results) / count,
     }
@@ -141,14 +153,20 @@ def evaluate(cases: list[EvaluationCase] | None = None) -> dict[str, Any]:
 
     # 逐个运行评估问题。
     for case in selected_cases:
-        # 记录 Qdrant 检索开始时间。
+        # 记录 Dense 基线检索开始时间。
         qdrant_started = perf_counter()
-        # 执行问题向量化和 Qdrant 候选召回。
-        candidates = retrieve_candidates(case.question)
+        # 只使用 bge-m3 Dense 向量执行基线召回。
+        dense_candidates = retrieve_dense_candidates(case.question, case.category)
         # 计算 Qdrant 阶段耗时并转换成毫秒。
         qdrant_latency_ms = (perf_counter() - qdrant_started) * 1000
         # 把原始候选转换成前台需要的排名结构。
-        raw_ranking = qdrant_ranking(candidates)
+        raw_ranking = qdrant_ranking(dense_candidates)
+
+        # 运行 Dense + BM25 + RRF Hybrid Search。
+        hybrid_started = perf_counter()
+        candidates = retrieve_candidates(case.question, case.category)
+        hybrid_latency_ms = (perf_counter() - hybrid_started) * 1000
+        hybrid_ranking = qdrant_ranking(candidates)
 
         # 记录 Reranker 阶段开始时间。
         rerank_started = perf_counter()
@@ -164,7 +182,7 @@ def evaluate(cases: list[EvaluationCase] | None = None) -> dict[str, Any]:
         # 把原问题改写成更适合向量检索的独立查询。
         rewritten_query = rewrite_query(case.question)
         # 使用改写查询重新从 Qdrant 召回一组候选。
-        rewritten_candidates = retrieve_candidates(rewritten_query)
+        rewritten_candidates = retrieve_candidates(rewritten_query, case.category)
         # 使用原始问题对改写查询召回的候选进行 Cross-Encoder 重排。
         rewritten_hits = rerank_candidates(case.question, rewritten_candidates, limit=None)
         # 统计 Query Rewrite、Qdrant 和 Reranker 三个阶段的总耗时。
@@ -172,8 +190,19 @@ def evaluate(cases: list[EvaluationCase] | None = None) -> dict[str, Any]:
         # 把第三条管线结果转换成可序列化排名。
         rewritten_ranking = reranker_ranking(rewritten_hits)
 
+        # 使用完整管线的前三个结果生成最终回答，评估端到端 RAG。
+        generation_started = perf_counter()
+        generated_answer = generate(case.question, rewritten_hits[:3]) if rewritten_hits else ""
+        generation_latency_ms = (perf_counter() - generation_started) * 1000
+        # 关键答案匹配是无需额外裁判模型的确定性正确性指标。
+        answer_match = float(bool(case.expected_answer) and case.expected_answer in generated_answer)
+        # 引用覆盖检查回答是否按照 Prompt 输出了至少一个 Reference 标记。
+        citation_present = float("[Reference" in generated_answer)
+
         # 查找正确来源在 Qdrant 原始结果中的排名。
         qdrant_rank = source_rank(raw_ranking, case.expected_source)
+        # 查找正确来源在 Hybrid Search 中的排名。
+        hybrid_rank = source_rank(hybrid_ranking, case.expected_source)
         # 查找正确来源在 Reranker 结果中的新排名。
         reranker_rank = source_rank(reranked_ranking, case.expected_source)
         # 查找正确来源在 Query Rewrite 完整管线中的排名。
@@ -186,6 +215,8 @@ def evaluate(cases: list[EvaluationCase] | None = None) -> dict[str, Any]:
                 "question": case.question,
                 # 保存正确来源，供前台对照。
                 "expected_source": case.expected_source,
+                # 保存评估使用的知识分类。
+                "category": case.category,
                 # 保存 Qdrant 原始检索的详细结果。
                 "qdrant": {
                     # 正确来源的原始排名，未命中时为 None。
@@ -197,12 +228,19 @@ def evaluate(cases: list[EvaluationCase] | None = None) -> dict[str, Any]:
                     # 展开当前排名对应的 Hit@1、Hit@3 和倒数排名。
                     **ranking_metrics(qdrant_rank),
                 },
+                # 保存未经 Reranker 的 Hybrid Search 结果。
+                "hybrid": {
+                    "rank": hybrid_rank,
+                    "latency_ms": hybrid_latency_ms,
+                    "ranking": hybrid_ranking,
+                    **ranking_metrics(hybrid_rank),
+                },
                 # 保存加入 Cross-Encoder 后的详细结果。
                 "reranker": {
                     # 正确来源在重排后的排名。
                     "rank": reranker_rank,
                     # 完整重排管线耗时等于 Qdrant 耗时加纯重排耗时。
-                    "latency_ms": qdrant_latency_ms + rerank_only_ms,
+                    "latency_ms": hybrid_latency_ms + rerank_only_ms,
                     # 单独保留纯 Reranker 耗时，便于性能分析。
                     "rerank_only_ms": rerank_only_ms,
                     # 保存完整重排结果。
@@ -223,10 +261,25 @@ def evaluate(cases: list[EvaluationCase] | None = None) -> dict[str, Any]:
                     # 展开 Hit@1、Hit@3 和倒数排名。
                     **ranking_metrics(rewrite_reranker_rank),
                 },
+                # 保存最终生成质量与端到端耗时。
+                "generation": {
+                    "expected_answer": case.expected_answer,
+                    "answer": generated_answer,
+                    "answer_match": answer_match,
+                    "citation_present": citation_present,
+                    "generation_latency_ms": generation_latency_ms,
+                    "end_to_end_latency_ms": rewrite_pipeline_latency_ms + generation_latency_ms,
+                },
             }
         )
 
     # 返回问题数量、三种方法的摘要以及所有逐题结果。
+    # 汇总最终回答的关键答案命中率、引用率和端到端耗时。
+    generation_summary = {
+        "answer_match_rate": sum(item["generation"]["answer_match"] for item in results) / len(results) if results else 0.0,
+        "citation_rate": sum(item["generation"]["citation_present"] for item in results) / len(results) if results else 0.0,
+        "avg_end_to_end_latency_ms": sum(item["generation"]["end_to_end_latency_ms"] for item in results) / len(results) if results else 0.0,
+    }
     return {
         # 保存参与评估的问题总数。
         "case_count": len(selected_cases),
@@ -234,10 +287,14 @@ def evaluate(cases: list[EvaluationCase] | None = None) -> dict[str, Any]:
         "summary": {
             # 计算 Qdrant 原始排名的汇总指标。
             "qdrant": summarize(results, "qdrant"),
+            # 计算 Dense + BM25 融合召回的汇总指标。
+            "hybrid": summarize(results, "hybrid"),
             # 计算完整重排管线的汇总指标。
             "reranker": summarize(results, "reranker"),
             # 计算 Query Rewrite + Qdrant + Reranker 的汇总指标。
             "rewrite_reranker": summarize(results, "rewrite_reranker"),
+            # 汇总最终回答的确定性质量代理指标。
+            "generation": generation_summary,
         },
         # 保存前台逐题表格所需的详细结果。
         "cases": results,

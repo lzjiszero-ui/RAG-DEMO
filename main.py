@@ -120,10 +120,10 @@ def ask_event_stream(question: str, session_id: str, category: str = "全部"):
     # 返回实际用于 Qdrant 的查询。
     yield stream_line({"type": "status", "step": "rewrite", "state": "completed", "message": "查询改写完成", "detail": rewritten_query})
     # 通知前端 Qdrant 向量召回已开始。
-    yield stream_line({"type": "status", "step": "retrieve", "state": "running", "message": "正在执行 Qdrant 向量召回"})
+    yield stream_line({"type": "status", "step": "retrieve", "state": "running", "message": "正在执行 Dense + BM25 Hybrid Search"})
     # 使用改写后的查询召回候选片段。
     candidates = retrieve_candidates(rewritten_query, category)
-    # 返回候选数量和最高向量分数。
+    # 返回候选数量和最高 RRF 融合分数。
     yield stream_line({"type": "status", "step": "retrieve", "state": "completed", "message": f"召回 {len(candidates)} 个候选片段", "candidate_count": len(candidates), "top_score": float(candidates[0][1]) if candidates else None})
     # 没有候选时直接返回拒答，不再加载 Reranker 或调用生成模型。
     if not candidates:

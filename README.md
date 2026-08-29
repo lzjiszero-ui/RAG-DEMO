@@ -5,13 +5,14 @@
 ```text
 knowledge/*.txt 与 knowledge/分类名/*.txt（多个文件）
   → RecursiveCharacterTextSplitter 分块
-  → OllamaEmbeddings（bge-m3）生成 Embedding
-  → QdrantVectorStore 保存向量
+  → OllamaEmbeddings（bge-m3）生成 Dense Embedding
+  → FastEmbed BM25 生成 Sparse Embedding
+  → QdrantVectorStore 同时保存 Dense / Sparse 向量
 
 用户问题
   → 根据 session_id 加载最近的多轮对话
   → ChatOllama（qwen3.5:4b）执行 Query Rewrite
-  → 可选 Qdrant Metadata Filter 按分类召回候选 Document
+  → Qdrant 使用 Dense + BM25 + RRF Hybrid Search 召回候选 Document
   → bge-reranker-base 对候选结果重新排序
   → ChatPromptTemplate 注入参考资料
   → ChatOllama（qwen3.5:4b）根据资料回答
@@ -101,7 +102,7 @@ uv run uvicorn main:app --reload --port 8001
 
 ## 4. 检索评估
 
-图形界面的“检索评估”页会读取 `eval/questions.json`，对比三条管线：原问题直接检索 Qdrant、原问题召回后使用 Cross-Encoder 重排、先用 Qwen Query Rewrite 再重新召回并重排。第三条会逐题调用 Qwen，但不会执行最终答案生成。
+图形界面的“检索评估”页会读取 `eval/questions.json`，对比四条管线：Dense 向量召回、Dense + BM25 的 RRF 融合召回、Hybrid + Cross-Encoder、Query Rewrite + Hybrid + Cross-Encoder。评估还会执行最终回答生成，用 `expected_answer` 检查关键答案命中率和引用率。
 
 也可以从命令行执行：
 
@@ -113,10 +114,15 @@ uv run python evaluation.py
 
 - `Hit@1`：正确来源是否排在第 1 名。
 - `Hit@3`：正确来源是否出现在前 3 名。
+- `Hit@5`：正确来源是否出现在前 5 名。
 - `MRR`：正确来源排名倒数的平均值，越接近 1 越好。
+- `nDCG@5`：前五名排序质量，正确来源越靠前分数越高。
 - `AVG TIME`：每个问题的平均检索耗时；Reranker 耗时包含 Qdrant 召回阶段。
+- `ANSWER MATCH`：最终回答包含 `expected_answer` 的问题比例。
+- `CITATION RATE`：最终回答带有 Reference 引用标记的问题比例。
+- `END-TO-END`：Query Rewrite、Hybrid Search、Reranker 和回答生成的平均总耗时。
 
-要增加评估问题，请在 `eval/questions.json` 中添加 `question` 和 `expected_source`。
+要增加评估问题，请在 `eval/questions.json` 中添加 `question`、`expected_source`、`category` 和 `expected_answer`。
 
 ## 5. VS Code Debug
 

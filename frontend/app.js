@@ -52,6 +52,8 @@ const evalLoading = document.querySelector("#eval-loading");
 const evalResults = document.querySelector("#eval-results");
 // 获取两种方法的汇总指标卡片容器。
 const metricComparison = document.querySelector("#metric-comparison");
+// 获取最终回答质量指标区域。
+const generationMetrics = document.querySelector("#generation-metrics");
 // 获取逐题评估表格的 tbody。
 const caseList = document.querySelector("#case-list");
 
@@ -244,7 +246,7 @@ const percent = (value) => `${(value * 100).toFixed(1)}%`;
 // 把毫秒数格式化成不带小数的可读文字。
 const milliseconds = (value) => `${value.toFixed(0)} ms`;
 
-// 生成一种检索方法的四项指标卡片。
+// 生成一种检索方法的六项指标卡片。
 function methodCard(name, label, metrics, highlighted = false) {
   // 返回包含方法名、Hit@1、Hit@3、MRR 和耗时的 HTML。
   return `
@@ -253,7 +255,9 @@ function methodCard(name, label, metrics, highlighted = false) {
       <div class="metrics">
         <div class="metric"><small>HIT@1</small><b>${percent(metrics.hit_at_1)}</b></div>
         <div class="metric"><small>HIT@3</small><b>${percent(metrics.hit_at_3)}</b></div>
+        <div class="metric"><small>HIT@5</small><b>${percent(metrics.hit_at_5)}</b></div>
         <div class="metric"><small>MRR</small><b>${metrics.mrr.toFixed(3)}</b></div>
+        <div class="metric"><small>NDCG@5</small><b>${metrics.ndcg_at_5.toFixed(3)}</b></div>
         <div class="metric"><small>AVG TIME</small><b>${milliseconds(metrics.avg_latency_ms)}</b></div>
       </div>
     </article>`;
@@ -281,16 +285,25 @@ function changeLabel(qdrantRank, rerankerRank) {
 
 // 把 /evaluate 返回的完整数据渲染到评估页面。
 function renderEvaluation(payload) {
-  // 生成原始 Qdrant、Cross-Encoder 和 Query Rewrite 三张汇总指标卡。
+  // 生成 Dense、Hybrid、Cross-Encoder 和 Query Rewrite 四张汇总指标卡。
   metricComparison.innerHTML = [
     // 第一张卡显示 Qdrant 原始向量排名指标。
     methodCard("Qdrant", "VECTOR RANKING", payload.summary.qdrant),
+    // 第二张卡显示 Dense + BM25 的 RRF 融合排名。
+    methodCard("Hybrid Search", "DENSE + BM25 + RRF", payload.summary.hybrid),
     // 第二张卡显示原问题经过 Cross-Encoder 重排后的指标。
     methodCard("Cross-Encoder", "ORIGINAL + RERANK", payload.summary.reranker),
     // 第三张卡显示 Query Rewrite 后重新召回并重排的完整管线。
     methodCard("Query Rewrite", "REWRITE + QDRANT + RERANK", payload.summary.rewrite_reranker, true),
   // 把三张卡片连接成 HTML 字符串。
   ].join("");
+  // 单独显示生成答案命中率、引用率和完整 RAG 平均耗时。
+  generationMetrics.innerHTML = `
+    <article class="generation-card">
+      <div><small>ANSWER MATCH</small><b>${percent(payload.summary.generation.answer_match_rate)}</b></div>
+      <div><small>CITATION RATE</small><b>${percent(payload.summary.generation.citation_rate)}</b></div>
+      <div><small>END-TO-END</small><b>${milliseconds(payload.summary.generation.avg_end_to_end_latency_ms)}</b></div>
+    </article>`;
   // 遍历每个评估问题并生成表格行。
   caseList.innerHTML = payload.cases.map((item) => {
     // 比较原始 Qdrant 与 Query Rewrite 完整管线的最终排名变化。
@@ -300,6 +313,7 @@ function renderEvaluation(payload) {
       <tr>
         <td><span class="case-question">${escapeHtml(item.question)}</span><span class="case-source">${escapeHtml(item.expected_source)}</span></td>
         <td><span class="rank-value">${rankText(item.qdrant.rank)}</span></td>
+        <td><span class="rank-value">${rankText(item.hybrid.rank)}</span></td>
         <td><span class="rank-value">${rankText(item.reranker.rank)}</span></td>
         <td><span class="rank-value">${rankText(item.rewrite_reranker.rank)}</span></td>
         <td><span class="rewritten-eval-query">${escapeHtml(item.rewrite_reranker.rewritten_query)}</span></td>

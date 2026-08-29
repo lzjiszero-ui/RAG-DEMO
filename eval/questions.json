@@ -1,38 +1,14 @@
 [
-  {
-    "question": "LangChain 中的 Document 包含什么？",
-    "expected_source": "langchain_rag_guide.txt"
-  },
-  {
-    "question": "Qdrant 中的 Collection 是什么？",
-    "expected_source": "qdrant_guide.txt"
-  },
-  {
-    "question": "Ollama 第一次接收请求为什么比较慢？",
-    "expected_source": "ollama_guide.txt"
-  },
-  {
-    "question": "RAG 的离线索引和在线问答有什么区别？",
-    "expected_source": "rag_basics.txt"
-  },
-  {
-    "question": "TOP_K 和 SCORE_THRESHOLD 分别控制什么？",
-    "expected_source": "qdrant_guide.txt"
-  },
-  {
-    "question": "RecursiveCharacterTextSplitter 如何切分文本？",
-    "expected_source": "langchain_rag_guide.txt"
-  },
-  {
-    "question": "Embedding 模型和聊天模型的职责有什么区别？",
-    "expected_source": "rag_basics.txt"
-  },
-  {
-    "question": "ChatOllama 在这个项目中负责什么？",
-    "expected_source": "ollama_guide.txt"
-  },
-  {
-    "question": "模型下载和模型加载有什么区别？",
-    "expected_source": "ollama_guide.txt"
-  }
+  {"question": "谁醉打蒋门神？", "expected_source": "水浒传/水浒传.txt", "category": "水浒传", "expected_answer": "武松"},
+  {"question": "豹子头是谁？", "expected_source": "水浒传/水浒传.txt", "category": "水浒传", "expected_answer": "林冲"},
+  {"question": "智取生辰纲是谁策划的？", "expected_source": "水浒传/水浒传.txt", "category": "水浒传", "expected_answer": "吴用"},
+  {"question": "风雪山神庙之后谁上了梁山？", "expected_source": "水浒传/水浒传.txt", "category": "水浒传", "expected_answer": "林冲"},
+  {"question": "谁使用九齿钉耙？", "expected_source": "西游记/西游记.txt", "category": "西游记", "expected_answer": "猪八戒"},
+  {"question": "谁大闹天宫？", "expected_source": "西游记/西游记.txt", "category": "西游记", "expected_answer": "孙悟空"},
+  {"question": "红孩儿最后被谁收服？", "expected_source": "西游记/西游记.txt", "category": "西游记", "expected_answer": "观音"},
+  {"question": "真假美猴王中的假悟空是谁？", "expected_source": "西游记/西游记.txt", "category": "西游记", "expected_answer": "六耳猕猴"},
+  {"question": "官渡之战中谁击败了袁绍？", "expected_source": "三国演义/三国演义.txt", "category": "三国演义", "expected_answer": "曹操"},
+  {"question": "三顾茅庐请出了谁？", "expected_source": "三国演义/三国演义.txt", "category": "三国演义", "expected_answer": "诸葛亮"},
+  {"question": "白衣渡江夺取荆州的将领是谁？", "expected_source": "三国演义/三国演义.txt", "category": "三国演义", "expected_answer": "吕蒙"},
+  {"question": "夷陵之战中谁击败了刘备？", "expected_source": "三国演义/三国演义.txt", "category": "三国演义", "expected_answer": "陆逊"}
 ]

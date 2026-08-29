@@ -22,10 +22,11 @@ from langchain_core.prompts import ChatPromptTemplate
 # 导入 Ollama 的聊天模型组件和 Embedding 组件。
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 # 导入 Qdrant 向量存储组件，负责写入和检索 Document。
-from langchain_qdrant import QdrantVectorStore
+from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 # 导入递归文本切分器，尽量按段落、换行、空格等自然边界切分。
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 # 导入 Qdrant Filter 数据结构，用 metadata.category 限制召回范围。
+from qdrant_client import QdrantClient
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 # 从配置模块导入模型、服务、分块和检索相关参数。
@@ -66,6 +67,13 @@ def embeddings() -> OllamaEmbeddings:
     """返回连接本地 bge-m3 的 Embedding 组件。"""
     # 指定模型名称和 Ollama 地址，但此时还没有立即生成向量。
     return OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=OLLAMA_URL)
+
+
+@lru_cache(maxsize=1)
+def sparse_embeddings() -> FastEmbedSparse:
+    """返回用于关键词检索的本地 BM25 Sparse Embedding。"""
+    cache_dir = Path(__file__).with_name(".models")
+    return FastEmbedSparse(model_name="Qdrant/bm25", cache_dir=str(cache_dir))
 
 
 # 定义文本切分函数，并允许测试或调用方覆盖默认参数。
@@ -120,6 +128,10 @@ def rebuild_index(documents: list[Document]) -> int:
         documents=documents,
         # 传入 bge-m3 Embedding 组件，让 LangChain 自动向量化。
         embedding=embeddings(),
+        # 同时生成 BM25 稀疏向量，用于关键词精确匹配。
+        sparse_embedding=sparse_embeddings(),
+        # 建立 Dense + Sparse 两套向量并由 Qdrant RRF 融合。
+        retrieval_mode=RetrievalMode.HYBRID,
         # 指定 Qdrant HTTP 地址。
         url=QDRANT_URL,
         # 指定要创建的 Collection 名称。
@@ -155,15 +167,23 @@ class SearchHit:
 
 # 创建一个连接现有 Qdrant Collection 的 LangChain VectorStore。
 def vector_store() -> QdrantVectorStore:
-    """连接现有 Qdrant Collection，并绑定相同的 Embedding 模型。"""
-    # 从已存在的 Collection 创建 VectorStore，不重新导入文档。
-    return QdrantVectorStore.from_existing_collection(
-        # 指定要查询的 Collection。
+    """连接现有 Qdrant Collection，并启用 Dense + BM25 Hybrid Search。"""
+    return QdrantVectorStore(
+        client=QdrantClient(url=QDRANT_URL),
         collection_name=COLLECTION_NAME,
-        # 绑定 bge-m3，查询时自动把问题转换成向量。
         embedding=embeddings(),
-        # 指定 Qdrant 服务地址。
-        url=QDRANT_URL,
+        sparse_embedding=sparse_embeddings(),
+        retrieval_mode=RetrievalMode.HYBRID,
+    )
+
+
+def dense_vector_store() -> QdrantVectorStore:
+    """只查询 Dense 向量，作为 Hybrid Search 的评估基线。"""
+    return QdrantVectorStore(
+        client=QdrantClient(url=QDRANT_URL),
+        collection_name=COLLECTION_NAME,
+        embedding=embeddings(),
+        retrieval_mode=RetrievalMode.DENSE,
     )
 
 
@@ -180,7 +200,7 @@ def reranker() -> TextCrossEncoder:
 
 # 定义第一阶段召回函数，返回 Document 与向量分数组成的元组列表。
 def retrieve_candidates(question: str, category: str = "全部") -> list[tuple[Document, float]]:
-    """从 Qdrant 召回候选 Document 和对应向量分数。"""
+    """使用 Dense + BM25 Hybrid Search 召回候选 Document。"""
     # 记录向量召回阶段开始时间。
     started = perf_counter()
     # “全部”不限制分类；具体分类使用 Qdrant Payload Filter。
@@ -188,30 +208,41 @@ def retrieve_candidates(question: str, category: str = "全部") -> list[tuple[D
         # must 表示返回的 Point 必须满足下面的 category 条件。
         must=[FieldCondition(key="metadata.category", match=MatchValue(value=category))]
     )
-    # 具体分类已由 Metadata 限定范围，使用更宽松阈值交给 Reranker 精排。
-    score_threshold = SCORE_THRESHOLD if category == "全部" else CATEGORY_SCORE_THRESHOLD
     # similarity_search_with_score 内部会调用 embed_query(question)。
     candidates = vector_store().similarity_search_with_score(
         # 传入用户的自然语言问题。
         query=question,
         # 最多召回 RETRIEVAL_K 个候选。
         k=RETRIEVAL_K,
-        # 过滤低于最低余弦相似度的候选。
-        score_threshold=score_threshold,
+        # Hybrid 返回的是 RRF 融合分数，不再套用 Dense 余弦阈值。
+        score_threshold=None,
         # 在向量相似度检索前限制允许参与检索的分类。
         filter=category_filter,
     )
     # 输出候选数量、最高分和耗时；没有候选时最高分显示 none。
     logger.info(
-        "qdrant retrieval completed | category=%s | threshold=%.3f | candidates=%d | top_score=%s | elapsed_ms=%.1f",
+        "hybrid retrieval completed | category=%s | fusion=rrf | candidates=%d | top_score=%s | elapsed_ms=%.1f",
         category,
-        score_threshold,
         len(candidates),
         f"{candidates[0][1]:.4f}" if candidates else "none",
         (perf_counter() - started) * 1000,
     )
     # 返回原始 Qdrant 候选及向量分数。
     return candidates
+
+
+def retrieve_dense_candidates(question: str, category: str = "全部") -> list[tuple[Document, float]]:
+    """仅使用 Dense Embedding 召回，供评估页面与 Hybrid Search 对比。"""
+    category_filter = None if category == "全部" else Filter(
+        must=[FieldCondition(key="metadata.category", match=MatchValue(value=category))]
+    )
+    score_threshold = SCORE_THRESHOLD if category == "全部" else CATEGORY_SCORE_THRESHOLD
+    return dense_vector_store().similarity_search_with_score(
+        query=question,
+        k=RETRIEVAL_K,
+        score_threshold=score_threshold,
+        filter=category_filter,
+    )
 
 
 # 定义第二阶段重排函数，并允许评估时取消最终数量限制。

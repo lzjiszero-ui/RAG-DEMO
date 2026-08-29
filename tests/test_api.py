@@ -117,9 +117,9 @@ def test_agent_stream_returns_tool_trace(monkeypatch) -> None:
     """Agent 模式应透传工具轨迹、来源并保存最终回答。"""
     hit = SearchHit(text="武松醉打蒋门神", vector_score=0.8, rerank_score=0.9, chunk_index=0, source="水浒传.txt")
 
-    def fake_agent(question, category, history):
+    def fake_agent(question, history):
         yield {"type": "status", "step": "tool", "state": "running", "message": "调用工具"}
-        yield {"type": "agent_result", "answer": "武松 [Reference 1]", "hits": [hit], "tool_trace": [{"name": "search_local_knowledge", "args": {"query": question}, "result_count": 1}]}
+        yield {"type": "agent_result", "answer": "武松 [Reference 1]", "hits": [hit], "tool_trace": [{"name": "search_local_knowledge", "args": {"query": question, "category": "水浒传"}, "result_count": 1, "selected_category": "水浒传"}]}
 
     monkeypatch.setattr(main, "run_agent", fake_agent)
     client.delete("/chat/agent-test?category=水浒传")
@@ -129,4 +129,6 @@ def test_agent_stream_returns_tool_trace(monkeypatch) -> None:
     assert response.status_code == 200
     assert events[-1]["answer"] == "武松 [Reference 1]"
     assert events[-1]["tool_trace"][0]["name"] == "search_local_knowledge"
+    assert events[-1]["agent_selected_category"] == "水浒传"
+    assert events[-1]["category"] == "水浒传"
     assert events[-1]["retrieval_mode"].startswith("agent/")

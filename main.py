@@ -128,22 +128,26 @@ def ask_event_stream(question: str, session_id: str, category: str = "全部"):
     yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [hit.__dict__ for hit in hits], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": category, "retrieval_mode": RETRIEVAL_MODE})
 
 
-def agent_event_stream(question: str, session_id: str, category: str = "全部"):
+def agent_event_stream(question: str, session_id: str):
     """运行 Qwen Agent 循环，并把模型判断和 Tool Calling 过程发送到页面。"""
     started = perf_counter()
-    memory_id = scoped_session_id(session_id, category)
+    memory_id = scoped_session_id(session_id, "agent")
     history = get_history(memory_id)
     chat_history = format_history(history)
-    yield stream_line({"type": "status", "step": "memory", "state": "completed", "message": f"分类：{category} · 已加载 {len(history)} 轮历史对话"})
+    yield stream_line({"type": "status", "step": "memory", "state": "completed", "message": f"Agent 独立会话 · 已加载 {len(history)} 轮历史对话"})
     yield stream_line({"type": "status", "step": "agent", "state": "running", "message": "Qwen Agent 正在分析问题并选择工具"})
     try:
-        for event in run_agent(question, category, chat_history):
+        for event in run_agent(question, chat_history):
             if event["type"] != "agent_result":
                 yield stream_line(event)
                 continue
             answer = event["answer"]
             hits = event["hits"]
             tool_trace = event["tool_trace"]
+            selected_category = next(
+                (item["selected_category"] for item in reversed(tool_trace) if item.get("selected_category")),
+                "未调用知识检索工具",
+            )
             append_turn(memory_id, ChatTurn(question=question, answer=answer, rewritten_query=question))
             yield stream_line({
                 "type": "result",
@@ -151,9 +155,10 @@ def agent_event_stream(question: str, session_id: str, category: str = "全部")
                 "rewritten_query": "由 Agent 动态决定工具参数",
                 "sources": [hit.__dict__ for hit in hits],
                 "tool_trace": tool_trace,
+                "agent_selected_category": selected_category,
                 "elapsed_ms": (perf_counter() - started) * 1000,
                 "session_id": session_id,
-                "category": category,
+                "category": selected_category,
                 "retrieval_mode": f"agent/{RETRIEVAL_MODE}",
             })
             return
@@ -197,7 +202,7 @@ def ask_stream_endpoint(request: ChatRequest) -> StreamingResponse:
     # 返回 NDJSON 响应；浏览器每收到一行就能立即刷新进度。
     return StreamingResponse(
         # 把问题交给流式 RAG 生成器。
-        agent_event_stream(request.question, request.session_id, request.category)
+        agent_event_stream(request.question, request.session_id)
         if request.mode == "agent"
         else ask_event_stream(request.question, request.session_id, request.category),
         # 声明内容类型为逐行 JSON，并使用 UTF-8 中文。

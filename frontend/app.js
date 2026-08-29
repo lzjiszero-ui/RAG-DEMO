@@ -34,11 +34,15 @@ const chatHistoryElement = document.querySelector("#chat-history");
 const newChatButton = document.querySelector("#new-chat");
 // 获取知识分类选择框，用于限制 Qdrant 只检索指定分类。
 const categorySelect = document.querySelector("#category");
+// 获取分类控件整体，Agent 模式下将其隐藏。
+const categoryControl = document.querySelector("#category-control");
 // 获取运行方式选择框，用于切换固定 RAG 与 Agent Tool Calling。
 const runModeSelect = document.querySelector("#run-mode");
 // 获取 Agent 工具调用轨迹容器。
 const toolTrace = document.querySelector("#tool-trace");
 const toolTraceList = document.querySelector("#tool-trace-list");
+// 显示 Agent 最终用于 Qdrant Filter 的分类。
+const agentSelectedCategory = document.querySelector("#agent-selected-category");
 // 获取顶部 Ollama/Qdrant 服务状态区域。
 const serviceStatus = document.querySelector("#service-status");
 // 获取“知识问答”标签按钮。
@@ -70,6 +74,9 @@ const caseList = document.querySelector("#case-list");
 let sessionId = localStorage.getItem("rag_session_id") || crypto.randomUUID();
 // 保存当前会话 ID，使刷新页面后仍能恢复同一段对话。
 localStorage.setItem("rag_session_id", sessionId);
+
+// Agent 使用独立历史作用域；固定 RAG 使用页面选择的分类。
+const activeHistoryCategory = () => runModeSelect.value === "agent" ? "agent" : categorySelect.value;
 
 // 定义 HTML 转义函数，防止来源文本被浏览器当成标签执行。
 const escapeHtml = (value) => value.replace(/[&<>'"]/g, (char) => ({
@@ -128,7 +135,7 @@ async function loadChatHistory() {
   // 每次切换分类都先恢复空状态，防止残留其他分类的聊天内容。
   chatHistoryElement.innerHTML = '<p class="chat-empty">当前是新会话，提出第一个问题吧。</p>';
   // 请求 session_id 对应的历史。
-  const response = await fetch(`/chat/${encodeURIComponent(sessionId)}?category=${encodeURIComponent(categorySelect.value)}`);
+  const response = await fetch(`/chat/${encodeURIComponent(sessionId)}?category=${encodeURIComponent(activeHistoryCategory())}`);
   // 请求失败时保留新会话空状态，不阻断页面其他功能。
   if (!response.ok) return;
   // 解析历史响应。
@@ -197,6 +204,8 @@ function resetPipeline() {
 // 将 Agent 实际执行的工具名称、参数和结果数量显示出来。
 function renderToolTrace(trace = []) {
   toolTrace.hidden = trace.length === 0;
+  const selected = [...trace].reverse().find((item) => item.selected_category)?.selected_category;
+  agentSelectedCategory.textContent = selected ? `自动选择分类：${selected}` : "未调用知识检索工具";
   toolTraceList.innerHTML = trace.map((item, index) => `
     <div><b>${index + 1}. ${escapeHtml(item.name)}</b><code>${escapeHtml(JSON.stringify(item.args))}</code><span>${item.result_count ?? "—"} 条结果</span></div>
   `).join("");
@@ -387,7 +396,7 @@ askForm.addEventListener("submit", async (event) => {
       // 声明请求体是 JSON。
       headers: { "Content-Type": "application/json" },
       // 把问题和当前会话 ID 转换成 JSON 字符串。
-      body: JSON.stringify({ question, session_id: sessionId, category: categorySelect.value, mode: runModeSelect.value }),
+      body: JSON.stringify({ question, session_id: sessionId, category: runModeSelect.value === "agent" ? "全部" : categorySelect.value, mode: runModeSelect.value }),
     });
     // 非 2xx 响应直接读取错误文字并进入 catch。
     if (!response.ok) throw new Error(await response.text() || "请求失败");
@@ -462,7 +471,7 @@ askForm.addEventListener("submit", async (event) => {
 // 点击“新建会话”时清除后端旧历史并生成新的 session_id。
 newChatButton.addEventListener("click", async () => {
   // 请求后端删除当前会话的内存历史。
-  await fetch(`/chat/${encodeURIComponent(sessionId)}?category=${encodeURIComponent(categorySelect.value)}`, { method: "DELETE" });
+  await fetch(`/chat/${encodeURIComponent(sessionId)}?category=${encodeURIComponent(activeHistoryCategory())}`, { method: "DELETE" });
   // 创建全新的浏览器会话标识。
   sessionId = crypto.randomUUID();
   // 保存新标识供刷新页面后继续使用。
@@ -484,6 +493,14 @@ categorySelect.addEventListener("change", async () => {
   // 加载 session_id 与当前分类组合后的独立历史。
   await loadChatHistory();
   // 清空问题并恢复等待状态，避免误把旧答案理解为当前分类结果。
+  questionInput.value = "";
+  setView("empty");
+});
+
+// 切换运行方式时，Agent 隐藏分类并读取自己的独立聊天历史。
+runModeSelect.addEventListener("change", async () => {
+  categoryControl.hidden = runModeSelect.value === "agent";
+  await loadChatHistory();
   questionInput.value = "";
   setView("empty");
 });

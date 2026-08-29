@@ -51,10 +51,12 @@
           <div class="chat-toolbar">
             <label for="question">你的问题</label>
             <div class="chat-actions">
-              <label class="category-label" for="category">知识分类</label>
-              <select id="category" name="category" aria-label="选择知识分类">
-                <option value="全部">全部</option>
-              </select>
+              <span class="filter-control" id="category-control">
+                <label class="category-label" for="category">知识分类</label>
+                <select id="category" name="category" aria-label="选择知识分类">
+                  <option value="全部">全部</option>
+                </select>
+              </span>
               <label class="category-label" for="run-mode">运行方式</label>
               <select id="run-mode" name="mode" aria-label="选择 RAG 或 Agent 模式">
                 <option value="rag">固定 RAG</option>
@@ -101,7 +103,7 @@
             <div class="answer-heading"><span>ANSWER</span><div class="answer-stats"><small id="total-time"></small><small id="source-count"></small></div></div>
             <!-- 显示 Query Rewrite 后实际用于 Qdrant 召回的查询。 -->
             <div class="rewrite-box"><small>REWRITTEN QUERY</small><p id="rewritten-query"></p></div>
-            <div class="tool-trace" id="tool-trace" hidden><small>AGENT TOOL CALLING</small><div id="tool-trace-list"></div></div>
+            <div class="tool-trace" id="tool-trace" hidden><small>AGENT TOOL CALLING · <span id="agent-selected-category"></span></small><div id="tool-trace-list"></div></div>
             <article class="answer" id="answer"></article>
             <div class="sources-heading"><h3>检索依据</h3><span id="retrieval-mode-label">RETRIEVAL SCORE</span></div>
             <div class="source-list" id="source-list"></div>

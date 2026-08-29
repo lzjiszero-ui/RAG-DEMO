@@ -22,7 +22,7 @@ def _message_text(message: AIMessage) -> str:
     return "\n".join(str(block.get("text", "")) if isinstance(block, dict) else str(block) for block in message.content).strip()
 
 
-def run_agent(question: str, category: str, chat_history: str) -> Iterator[dict[str, Any]]:
+def run_agent(question: str, chat_history: str) -> Iterator[dict[str, Any]]:
     """让模型自主选择工具，并逐步产出供页面显示的 Agent 事件。"""
     model = ChatOllama(
         model=CHAT_MODEL,
@@ -33,9 +33,9 @@ def run_agent(question: str, category: str, chat_history: str) -> Iterator[dict[
     messages = [
         SystemMessage(content=(
             "你是本地知识库 Agent。回答知识问题前必须调用 search_local_knowledge，"
-            "不知道分类时使用用户当前选择的分类；只有用户询问知识库范围时才调用 list_knowledge_categories。"
+            "请根据问题内容自主选择 category；无法判断时使用‘全部’。只有用户询问知识库范围时才调用 list_knowledge_categories。"
             "必须只根据工具返回资料回答，并用 [Reference N] 标明依据；没有结果就明确说不知道。"
-            f"\n页面当前分类：{category}\n历史对话：\n{chat_history}"
+            f"\n历史对话：\n{chat_history}"
         )),
         HumanMessage(content=question),
     ]
@@ -63,11 +63,16 @@ def run_agent(question: str, category: str, chat_history: str) -> Iterator[dict[
             elif name == "search_local_knowledge":
                 collected_hits, output = search_knowledge(
                     str(arguments.get("query", question)),
-                    str(arguments.get("category", category)),
+                    str(arguments.get("category", "全部")),
                 )
             else:
                 output = selected_tool.invoke(arguments)
-            tool_trace.append({"name": name, "args": arguments, "result_count": output.get("count") if isinstance(output, dict) else None})
+            tool_trace.append({
+                "name": name,
+                "args": arguments,
+                "result_count": output.get("count") if isinstance(output, dict) else None,
+                "selected_category": output.get("category") if isinstance(output, dict) else None,
+            })
             messages.append(ToolMessage(content=json.dumps(output, ensure_ascii=False), tool_call_id=call["id"]))
             yield {"type": "status", "step": "tool", "state": "completed", "message": f"工具 {name} 执行完成", "tool_name": name, "result_count": output.get("count") if isinstance(output, dict) else None}
 

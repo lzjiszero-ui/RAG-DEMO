@@ -166,7 +166,7 @@ uv run pytest -q
 
 ## 7. Agent、Tool Calling 与 MCP
 
-页面“运行方式”选择 **Agent + Tools** 后，Qwen 不再执行写死的 RAG 顺序，而是先读取工具描述，自主生成 Tool Call。当前提供两个工具：
+页面“运行方式”选择 **Agent + Tools** 后，分类选择会隐藏，Qwen 不再执行写死的 RAG 顺序，而是先读取工具描述，自主选择知识分类并生成 Tool Call；页面会显示实际选择的分类。固定 RAG 模式仍保留页面分类，并把它作为不可绕过的 Qdrant Metadata Filter。当前提供两个工具：
 
 - `search_local_knowledge`：按当前检索模式查询 Qdrant，并在需要时执行 Reranker。
 - `list_knowledge_categories`：列出可以检索的知识分类。

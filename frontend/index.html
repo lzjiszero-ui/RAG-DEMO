@@ -55,6 +55,11 @@
               <select id="category" name="category" aria-label="选择知识分类">
                 <option value="全部">全部</option>
               </select>
+              <label class="category-label" for="run-mode">运行方式</label>
+              <select id="run-mode" name="mode" aria-label="选择 RAG 或 Agent 模式">
+                <option value="rag">固定 RAG</option>
+                <option value="agent">Agent + Tools</option>
+              </select>
               <button id="new-chat" type="button">＋ 新建会话</button>
             </div>
           </div>
@@ -87,6 +92,8 @@
                 <li data-step="retrieve"><span>3</span><div><b>Retrieval Mode</b><small>读取 .env 配置</small></div></li>
                 <li data-step="rerank"><span>4</span><div><b>Cross-Encoder</b><small>等待执行</small></div></li>
                 <li data-step="generate"><span>5</span><div><b>Qwen Generation</b><small>等待执行</small></div></li>
+                <li data-step="agent"><span>A</span><div><b>Agent Decision</b><small>Agent 模式使用</small></div></li>
+                <li data-step="tool"><span>T</span><div><b>Tool Calling</b><small>Agent 模式使用</small></div></li>
               </ol>
             </div>
           </div>
@@ -94,6 +101,7 @@
             <div class="answer-heading"><span>ANSWER</span><div class="answer-stats"><small id="total-time"></small><small id="source-count"></small></div></div>
             <!-- 显示 Query Rewrite 后实际用于 Qdrant 召回的查询。 -->
             <div class="rewrite-box"><small>REWRITTEN QUERY</small><p id="rewritten-query"></p></div>
+            <div class="tool-trace" id="tool-trace" hidden><small>AGENT TOOL CALLING</small><div id="tool-trace-list"></div></div>
             <article class="answer" id="answer"></article>
             <div class="sources-heading"><h3>检索依据</h3><span id="retrieval-mode-label">RETRIEVAL SCORE</span></div>
             <div class="source-list" id="source-list"></div>

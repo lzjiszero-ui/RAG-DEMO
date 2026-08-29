@@ -34,6 +34,11 @@ const chatHistoryElement = document.querySelector("#chat-history");
 const newChatButton = document.querySelector("#new-chat");
 // 获取知识分类选择框，用于限制 Qdrant 只检索指定分类。
 const categorySelect = document.querySelector("#category");
+// 获取运行方式选择框，用于切换固定 RAG 与 Agent Tool Calling。
+const runModeSelect = document.querySelector("#run-mode");
+// 获取 Agent 工具调用轨迹容器。
+const toolTrace = document.querySelector("#tool-trace");
+const toolTraceList = document.querySelector("#tool-trace-list");
 // 获取顶部 Ollama/Qdrant 服务状态区域。
 const serviceStatus = document.querySelector("#service-status");
 // 获取“知识问答”标签按钮。
@@ -185,6 +190,16 @@ function resetPipeline() {
   reasoningStatus.textContent = "Reasoning: 等待后端配置";
   // 恢复初始进度说明。
   progressMessage.textContent = "准备执行 RAG 流程";
+  toolTrace.hidden = true;
+  toolTraceList.innerHTML = "";
+}
+
+// 将 Agent 实际执行的工具名称、参数和结果数量显示出来。
+function renderToolTrace(trace = []) {
+  toolTrace.hidden = trace.length === 0;
+  toolTraceList.innerHTML = trace.map((item, index) => `
+    <div><b>${index + 1}. ${escapeHtml(item.name)}</b><code>${escapeHtml(JSON.stringify(item.args))}</code><span>${item.result_count ?? "—"} 条结果</span></div>
+  `).join("");
 }
 
 // 根据后端状态事件更新一个真实处理阶段。
@@ -215,7 +230,7 @@ function updatePipeline(event) {
 // 把后端 sources 数组渲染成参考来源卡片。
 function renderSources(sources, retrievalMode = "unknown") {
   // 明确显示本次回答实际采用的运行模式。
-  retrievalModeLabel.textContent = retrievalMode === "hybrid_rerank" ? "HYBRID RRF / RERANK" : `${retrievalMode.toUpperCase()} SCORE`;
+  retrievalModeLabel.textContent = retrievalMode.includes("hybrid_rerank") ? "HYBRID RRF / RERANK" : `${retrievalMode.toUpperCase()} SCORE`;
   // 显示进入 Prompt 的参考片段总数。
   sourceCount.textContent = `${sources.length} 个参考片段`;
   // 遍历来源并生成卡片 HTML，最后连接成一个字符串。
@@ -225,7 +240,7 @@ function renderSources(sources, retrievalMode = "unknown") {
       <!-- 显示来源、片段编号和两个检索分数。 -->
       <div class="source-meta">
         <span class="source-name">[Reference ${index + 1}] ${escapeHtml(source.category)} · ${escapeHtml(source.point_name)} · ${escapeHtml(source.source)}</span>
-        <span class="source-scores">${source.vector_score.toFixed(4)}${retrievalMode === "hybrid_rerank" ? ` / ${source.rerank_score.toFixed(4)}` : ""}</span>
+        <span class="source-scores">${source.vector_score.toFixed(4)}${retrievalMode.includes("hybrid_rerank") ? ` / ${source.rerank_score.toFixed(4)}` : ""}</span>
       </div>
       <!-- 显示经过 HTML 转义的知识片段正文。 -->
       <p class="source-text">${escapeHtml(source.text)}</p>
@@ -372,7 +387,7 @@ askForm.addEventListener("submit", async (event) => {
       // 声明请求体是 JSON。
       headers: { "Content-Type": "application/json" },
       // 把问题和当前会话 ID 转换成 JSON 字符串。
-      body: JSON.stringify({ question, session_id: sessionId, category: categorySelect.value }),
+      body: JSON.stringify({ question, session_id: sessionId, category: categorySelect.value, mode: runModeSelect.value }),
     });
     // 非 2xx 响应直接读取错误文字并进入 catch。
     if (!response.ok) throw new Error(await response.text() || "请求失败");
@@ -402,6 +417,7 @@ askForm.addEventListener("submit", async (event) => {
         if (eventPayload.type === "status") updatePipeline(eventPayload);
         // 最终事件保存为答案载荷。
         if (eventPayload.type === "result") payload = eventPayload;
+        if (eventPayload.type === "error") throw new Error(eventPayload.message);
       });
       // 流读取完成时跳出循环。
       if (done) break;
@@ -420,6 +436,8 @@ askForm.addEventListener("submit", async (event) => {
     totalTimeElement.textContent = `总耗时 ${(payload.elapsed_ms / 1000).toFixed(2)} 秒`;
     // 渲染后端返回的参考来源。
     renderSources(payload.sources, payload.retrieval_mode);
+    // Agent 模式下展示模型真正发起过的每一次 Tool Calling。
+    renderToolTrace(payload.tool_trace || []);
   // 捕获问答请求错误。
   } catch (error) {
     // 给答案区域添加错误样式。

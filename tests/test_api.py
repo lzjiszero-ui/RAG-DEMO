@@ -119,3 +119,22 @@ def test_chat_history_is_isolated_by_category(monkeypatch) -> None:
 
     assert len(client.get("/chat/category-test?category=水浒传").json()["turns"]) == 1
     assert client.get("/chat/category-test?category=西游记").json()["turns"] == []
+
+
+def test_agent_stream_returns_tool_trace(monkeypatch) -> None:
+    """Agent 模式应透传工具轨迹、来源并保存最终回答。"""
+    hit = SearchHit(text="武松醉打蒋门神", vector_score=0.8, rerank_score=0.9, chunk_index=0, source="水浒传.txt")
+
+    def fake_agent(question, category, history):
+        yield {"type": "status", "step": "tool", "state": "running", "message": "调用工具"}
+        yield {"type": "agent_result", "answer": "武松 [Reference 1]", "hits": [hit], "tool_trace": [{"name": "search_local_knowledge", "args": {"query": question}, "result_count": 1}]}
+
+    monkeypatch.setattr(main, "run_agent", fake_agent)
+    client.delete("/chat/agent-test?category=水浒传")
+    response = client.post("/ask/stream", json={"question": "谁打了蒋门神", "session_id": "agent-test", "category": "水浒传", "mode": "agent"})
+    events = [main.json.loads(line) for line in response.text.splitlines()]
+
+    assert response.status_code == 200
+    assert events[-1]["answer"] == "武松 [Reference 1]"
+    assert events[-1]["tool_trace"][0]["name"] == "search_local_knowledge"
+    assert events[-1]["retrieval_mode"].startswith("agent/")

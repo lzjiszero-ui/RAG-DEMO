@@ -52,11 +52,12 @@ h1 span { color: var(--muted); }
 .question-card, .result-panel { border: 1px solid var(--line); border-radius: 20px; background: var(--panel); backdrop-filter: blur(18px); }
 .question-card { padding: 24px; }
 .question-card label { display: block; margin-bottom: 12px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
-.chat-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.chat-toolbar { display: grid; gap: 10px; margin-bottom: 12px; }
 .chat-toolbar label { margin: 0; }
 .chat-toolbar button { border: 0; background: transparent; color: var(--accent); font-size: 11px; cursor: pointer; }
-.chat-actions { display: flex; align-items: center; gap: 9px; }
-.chat-toolbar .category-label { color: var(--muted); font-size: 9px; letter-spacing: .08em; }
+.chat-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.chat-toolbar .category-label { color: var(--muted); font-size: 9px; letter-spacing: .08em; white-space: nowrap; }
+.chat-actions button { margin-left: auto; white-space: nowrap; }
 .chat-toolbar select { max-width: 130px; border: 1px solid var(--line); border-radius: 8px; outline: 0; padding: 7px 28px 7px 9px; background: #0c0f13; color: var(--text); font-size: 11px; cursor: pointer; }
 .chat-toolbar select:focus { border-color: rgba(215,255,95,.45); }
 .chat-history { max-height: 260px; overflow-y: auto; display: grid; gap: 9px; margin-bottom: 14px; padding-right: 4px; }
@@ -102,6 +103,12 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
 .rewrite-box { margin-top: 16px; padding: 12px 14px; border-left: 2px solid var(--accent); background: var(--accent-soft); border-radius: 0 9px 9px 0; }
 .rewrite-box small { color: var(--accent); font-size: 9px; font-weight: 800; letter-spacing: .14em; }
 .rewrite-box p { margin: 6px 0 0; color: #c9d0d7; font-size: 12px; line-height: 1.55; }
+.tool-trace { margin-top: 12px; padding: 12px 14px; border: 1px solid rgba(115,169,255,.25); border-radius: 9px; background: rgba(115,169,255,.05); }
+.tool-trace > small { color: var(--blue); font-size: 9px; font-weight: 800; letter-spacing: .14em; }
+.tool-trace-list { display: grid; gap: 8px; margin-top: 9px; }
+.tool-trace-list div { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; font-size: 11px; }
+.tool-trace-list code { min-width: 0; overflow-wrap: anywhere; color: #b9c1ca; }
+.tool-trace-list span { color: var(--muted); }
 .answer { margin: 18px 0 28px; white-space: pre-wrap; line-height: 1.85; font-size: 15px; }
 .sources-heading { padding-top: 20px; border-top: 1px solid var(--line); }
 .sources-heading h3 { margin: 0; font-size: 13px; }

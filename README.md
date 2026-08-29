@@ -160,3 +160,20 @@ uv run python evaluation.py
 ```powershell
 uv run pytest -q
 ```
+
+## 7. Agent、Tool Calling 与 MCP
+
+页面“运行方式”选择 **Agent + Tools** 后，Qwen 不再执行写死的 RAG 顺序，而是先读取工具描述，自主生成 Tool Call。当前提供两个工具：
+
+- `search_local_knowledge`：按当前检索模式查询 Qdrant，并在需要时执行 Reranker。
+- `list_knowledge_categories`：列出可以检索的知识分类。
+
+后端把工具结果作为 `ToolMessage` 返回给 Qwen，直到模型输出最终答案或达到 `AGENT_MAX_STEPS`。页面会显示工具名、参数与结果数量。`AGENT_REASONING` 控制 Agent 判断阶段是否启用 Qwen reasoning。
+
+同一组能力也通过 MCP Server 暴露。手动启动 stdio MCP Server：
+
+```powershell
+uv run python mcp_server.py
+```
+
+外部 MCP 客户端应配置命令 `uv`，参数为 `--directory`、本工程绝对路径、`run`、`python`、`mcp_server.py`。MCP 本身不提供网页；它是一套让 Claude Desktop、Codex 等 AI 客户端发现并调用本工程工具的标准协议。页面 Agent 使用的是 LangChain Tool Calling，MCP 客户端使用的是 MCP，但二者最终复用 `agent_tools.py` 中完全相同的检索函数。

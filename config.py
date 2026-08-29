@@ -27,6 +27,10 @@ CONTEXTUAL_RETRIEVAL = os.getenv("CONTEXTUAL_RETRIEVAL", "true").lower() in {"tr
 CONTEXTUAL_MAX_DOCUMENT_CHARS = max(1000, int(os.getenv("CONTEXTUAL_MAX_DOCUMENT_CHARS", "12000")))
 # 读取 Query Rewrite 是否开启推理模式，并兼容 true、1、yes、on 写法。
 QUERY_REWRITE_REASONING = os.getenv("QUERY_REWRITE_REASONING", "true").lower() in {"true", "1", "yes", "on"}
+# 读取 Agent 在规划和选择工具时是否输出推理内容。
+AGENT_REASONING = os.getenv("AGENT_REASONING", "false").lower() in {"true", "1", "yes", "on"}
+# 限制一次 Agent 问答最多执行多少轮“模型判断 → 工具调用”，防止无限循环。
+AGENT_MAX_STEPS = max(1, int(os.getenv("AGENT_MAX_STEPS", "4")))
 # 读取每个会话最多保留的完整问答轮数。
 MAX_HISTORY_TURNS = max(1, int(os.getenv("MAX_HISTORY_TURNS", "6")))
 # 读取 Qdrant Collection 名称，用于隔离本项目的向量数据。

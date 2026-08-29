@@ -127,6 +127,12 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
 .method-card { min-width: 0; border: 1px solid var(--line); border-radius: 16px; padding: 20px; background: rgba(0,0,0,.14); }
 .method-card.is-reranker { border-color: rgba(215,255,95,.25); background: linear-gradient(145deg, rgba(215,255,95,.08), rgba(0,0,0,.12)); }
 .generation-metrics { margin: -14px 0 30px; }
+.bm25-impact { margin: -14px 0 30px; }
+.impact-card { display: grid; grid-template-columns: 1.5fr repeat(6, 1fr); gap: 10px; align-items: center; border: 1px solid rgba(215,255,95,.28); border-radius: 14px; padding: 16px; background: rgba(215,255,95,.055); }
+.impact-card > div { display: grid; gap: 7px; min-width: 0; }
+.impact-card small { color: var(--muted); font-size: 9px; letter-spacing: .1em; }
+.impact-card b { font-size: 14px; overflow-wrap: anywhere; }
+.impact-title b { color: var(--accent); font-size: 15px; }
 .generation-card { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; border: 1px solid rgba(115,169,255,.25); border-radius: 14px; padding: 16px; background: rgba(115,169,255,.05); }
 .generation-card div { display: grid; gap: 7px; }
 .generation-card small { color: var(--muted); font-size: 9px; letter-spacing: .12em; }
@@ -176,4 +182,6 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
   .primary-button { justify-content: space-between; }
   .chat-toolbar { align-items: flex-start; }
   .chat-actions { justify-content: flex-end; flex-wrap: wrap; }
+  .impact-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .impact-title { grid-column: 1 / -1; }
 }

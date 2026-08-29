@@ -125,11 +125,12 @@
         <!-- 评估完成后显示汇总指标和逐题排名。 -->
         <div id="eval-results" hidden>
           <div class="metric-comparison" id="metric-comparison"></div>
+          <div class="bm25-impact" id="bm25-impact"></div>
           <div class="generation-metrics" id="generation-metrics"></div>
           <div class="case-heading"><div><span>QUESTION LEVEL</span><h3>逐题排名变化</h3></div><small>排名越小越好，— 表示未命中</small></div>
           <div class="case-table-wrap">
             <table class="case-table">
-              <thead><tr><th>测试问题 / 正确来源</th><th>Dense</th><th>Hybrid</th><th>+ Reranker</th><th>Rewrite + Rerank</th><th>改写查询</th><th>相对 Dense 变化</th><th>完整管线耗时</th></tr></thead>
+              <thead><tr><th>测试问题 / 正确来源</th><th>加入前 Dense</th><th>加入后 Hybrid</th><th>BM25 排名变化</th><th>+ Reranker</th><th>Rewrite + Rerank</th><th>改写查询</th><th>最终管线变化</th><th>完整管线耗时</th></tr></thead>
               <tbody id="case-list"></tbody>
             </table>
           </div>

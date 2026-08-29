@@ -1,7 +1,7 @@
 from langchain_core.documents import Document
 
 import evaluation
-from evaluation import EvaluationCase, evaluate, ranking_metrics, source_rank, summarize
+from evaluation import EvaluationCase, evaluate, ranking_metrics, source_rank, summarize, summarize_bm25_impact
 from rag import SearchHit
 
 
@@ -66,6 +66,20 @@ def test_summarize_averages_metrics_and_latency() -> None:
         "ndcg_at_5": (1.0 + 1.0 / __import__("math").log2(3)) / 2,
         "avg_latency_ms": 15.0,
     }
+
+
+def test_summarize_bm25_impact_compares_dense_and_hybrid() -> None:
+    results = [{
+        "qdrant": {"rank": 2, "hit_at_1": 0.0, "hit_at_3": 1.0, "hit_at_5": 1.0, "reciprocal_rank": 0.5, "ndcg_at_5": 0.63, "latency_ms": 10.0},
+        "hybrid": {"rank": 1, "hit_at_1": 1.0, "hit_at_3": 1.0, "hit_at_5": 1.0, "reciprocal_rank": 1.0, "ndcg_at_5": 1.0, "latency_ms": 14.0},
+    }]
+
+    impact = summarize_bm25_impact(results)
+
+    assert impact["hit_at_1_delta"] == 1.0
+    assert impact["mrr_delta"] == 0.5
+    assert impact["latency_delta_ms"] == 4.0
+    assert impact["improved_cases"] == 1
 
 
 def test_evaluate_compares_original_rerank_and_rewritten_pipeline(monkeypatch) -> None:

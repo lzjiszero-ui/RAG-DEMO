@@ -54,6 +54,8 @@ const evalResults = document.querySelector("#eval-results");
 const metricComparison = document.querySelector("#metric-comparison");
 // 获取最终回答质量指标区域。
 const generationMetrics = document.querySelector("#generation-metrics");
+// 获取 BM25 加入前后差值汇总区域。
+const bm25Impact = document.querySelector("#bm25-impact");
 // 获取逐题评估表格的 tbody。
 const caseList = document.querySelector("#case-list");
 
@@ -245,6 +247,8 @@ function selectTab(tab) {
 const percent = (value) => `${(value * 100).toFixed(1)}%`;
 // 把毫秒数格式化成不带小数的可读文字。
 const milliseconds = (value) => `${value.toFixed(0)} ms`;
+// 带正负号显示指标差值，便于识别提升或下降。
+const signed = (value, formatter) => `${value > 0 ? "+" : ""}${formatter(value)}`;
 
 // 生成一种检索方法的六项指标卡片。
 function methodCard(name, label, metrics, highlighted = false) {
@@ -297,6 +301,18 @@ function renderEvaluation(payload) {
     methodCard("Query Rewrite", "REWRITE + QDRANT + RERANK", payload.summary.rewrite_reranker, true),
   // 把三张卡片连接成 HTML 字符串。
   ].join("");
+  // 明确展示加入 BM25 后相对于纯 Dense 的总体变化。
+  const impact = payload.summary.bm25_impact;
+  bm25Impact.innerHTML = `
+    <article class="impact-card">
+      <div class="impact-title"><small>BM25 BEFORE / AFTER</small><b>加入 BM25 带来的变化</b></div>
+      <div><small>HIT@1</small><b>${signed(impact.hit_at_1_delta, percent)}</b></div>
+      <div><small>HIT@3</small><b>${signed(impact.hit_at_3_delta, percent)}</b></div>
+      <div><small>MRR</small><b>${signed(impact.mrr_delta, (value) => value.toFixed(3))}</b></div>
+      <div><small>NDCG@5</small><b>${signed(impact.ndcg_at_5_delta, (value) => value.toFixed(3))}</b></div>
+      <div><small>AVG TIME</small><b>${signed(impact.latency_delta_ms, milliseconds)}</b></div>
+      <div><small>逐题变化</small><b>${impact.improved_cases} 升 / ${impact.same_cases} 平 / ${impact.worse_cases} 降</b></div>
+    </article>`;
   // 单独显示生成答案命中率、引用率和完整 RAG 平均耗时。
   generationMetrics.innerHTML = `
     <article class="generation-card">
@@ -308,12 +324,15 @@ function renderEvaluation(payload) {
   caseList.innerHTML = payload.cases.map((item) => {
     // 比较原始 Qdrant 与 Query Rewrite 完整管线的最终排名变化。
     const [changeClass, changeText] = changeLabel(item.qdrant.rank, item.rewrite_reranker.rank);
+    // 单独比较加入 BM25 前的 Dense 排名和加入后的 Hybrid 排名。
+    const [bm25Class, bm25Text] = changeLabel(item.qdrant.rank, item.hybrid.rank);
     // 返回当前问题对应的表格行。
     return `
       <tr>
         <td><span class="case-question">${escapeHtml(item.question)}</span><span class="case-source">${escapeHtml(item.expected_source)}</span></td>
         <td><span class="rank-value">${rankText(item.qdrant.rank)}</span></td>
         <td><span class="rank-value">${rankText(item.hybrid.rank)}</span></td>
+        <td><span class="change ${bm25Class}">${bm25Text}</span></td>
         <td><span class="rank-value">${rankText(item.reranker.rank)}</span></td>
         <td><span class="rank-value">${rankText(item.rewrite_reranker.rank)}</span></td>
         <td><span class="rewritten-eval-query">${escapeHtml(item.rewrite_reranker.rewritten_query)}</span></td>

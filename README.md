@@ -104,6 +104,8 @@ uv run uvicorn main:app --reload --port 8001
 
 图形界面的“检索评估”页会读取 `eval/questions.json`，对比四条管线：Dense 向量召回、Dense + BM25 的 RRF 融合召回、Hybrid + Cross-Encoder、Query Rewrite + Hybrid + Cross-Encoder。评估还会执行最终回答生成，用 `expected_answer` 检查关键答案命中率和引用率。
 
+“加入 BM25 带来的变化”区域会直接计算 Hybrid 相对 Dense 的 Hit@1、Hit@3、MRR、nDCG@5 和平均耗时差值，并统计逐题排名提升、持平与下降的数量；逐题表也会单独显示 Dense → Hybrid 的排名变化。
+
 也可以从命令行执行：
 
 ```powershell

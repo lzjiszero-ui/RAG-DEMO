@@ -143,6 +143,22 @@ def summarize(results: list[dict[str, Any]], method: str) -> dict[str, float]:
     }
 
 
+def summarize_bm25_impact(results: list[dict[str, Any]]) -> dict[str, float | int]:
+    """汇总加入 BM25 后相对于纯 Dense 检索的变化。"""
+    dense = summarize(results, "qdrant")
+    hybrid = summarize(results, "hybrid")
+    return {
+        "hit_at_1_delta": hybrid["hit_at_1"] - dense["hit_at_1"],
+        "hit_at_3_delta": hybrid["hit_at_3"] - dense["hit_at_3"],
+        "mrr_delta": hybrid["mrr"] - dense["mrr"],
+        "ndcg_at_5_delta": hybrid["ndcg_at_5"] - dense["ndcg_at_5"],
+        "latency_delta_ms": hybrid["avg_latency_ms"] - dense["avg_latency_ms"],
+        "improved_cases": sum(1 for item in results if item["hybrid"]["rank"] is not None and (item["qdrant"]["rank"] is None or item["hybrid"]["rank"] < item["qdrant"]["rank"])),
+        "same_cases": sum(1 for item in results if item["hybrid"]["rank"] == item["qdrant"]["rank"]),
+        "worse_cases": sum(1 for item in results if item["qdrant"]["rank"] is not None and (item["hybrid"]["rank"] is None or item["hybrid"]["rank"] > item["qdrant"]["rank"])),
+    }
+
+
 # 定义完整评估入口；不传 cases 时读取默认 JSON。
 def evaluate(cases: list[EvaluationCase] | None = None) -> dict[str, Any]:
     """运行全部问题，返回逐题排名和汇总指标。"""
@@ -295,6 +311,8 @@ def evaluate(cases: list[EvaluationCase] | None = None) -> dict[str, Any]:
             "rewrite_reranker": summarize(results, "rewrite_reranker"),
             # 汇总最终回答的确定性质量代理指标。
             "generation": generation_summary,
+            # 明确给出“加入 BM25 前后”的指标差值与逐题变化数量。
+            "bm25_impact": summarize_bm25_impact(results),
         },
         # 保存前台逐题表格所需的详细结果。
         "cases": results,

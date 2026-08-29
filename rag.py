@@ -25,6 +25,8 @@ from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_qdrant import QdrantVectorStore
 # 导入递归文本切分器，尽量按段落、换行、空格等自然边界切分。
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+# 导入 Qdrant Filter 数据结构，用 metadata.category 限制召回范围。
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 # 从配置模块导入模型、服务、分块和检索相关参数。
 from config import (
@@ -144,6 +146,10 @@ class SearchHit:
     chunk_index: int
     # 片段来源文件相对于 knowledge 目录的路径。
     source: str
+    # 片段所属知识分类。
+    category: str = "通用"
+    # 方便页面和 Dashboard 识别的 Point 名称。
+    point_name: str = "unknown"
 
 
 # 创建一个连接现有 Qdrant Collection 的 LangChain VectorStore。
@@ -172,10 +178,15 @@ def reranker() -> TextCrossEncoder:
 
 
 # 定义第一阶段召回函数，返回 Document 与向量分数组成的元组列表。
-def retrieve_candidates(question: str) -> list[tuple[Document, float]]:
+def retrieve_candidates(question: str, category: str = "全部") -> list[tuple[Document, float]]:
     """从 Qdrant 召回候选 Document 和对应向量分数。"""
     # 记录向量召回阶段开始时间。
     started = perf_counter()
+    # “全部”不限制分类；具体分类使用 Qdrant Payload Filter。
+    category_filter = None if category == "全部" else Filter(
+        # must 表示返回的 Point 必须满足下面的 category 条件。
+        must=[FieldCondition(key="metadata.category", match=MatchValue(value=category))]
+    )
     # similarity_search_with_score 内部会调用 embed_query(question)。
     candidates = vector_store().similarity_search_with_score(
         # 传入用户的自然语言问题。
@@ -184,10 +195,13 @@ def retrieve_candidates(question: str) -> list[tuple[Document, float]]:
         k=RETRIEVAL_K,
         # 过滤低于最低余弦相似度的候选。
         score_threshold=SCORE_THRESHOLD,
+        # 在向量相似度检索前限制允许参与检索的分类。
+        filter=category_filter,
     )
     # 输出候选数量、最高分和耗时；没有候选时最高分显示 none。
     logger.info(
-        "qdrant retrieval completed | candidates=%d | top_score=%s | elapsed_ms=%.1f",
+        "qdrant retrieval completed | category=%s | candidates=%d | top_score=%s | elapsed_ms=%.1f",
+        category,
         len(candidates),
         f"{candidates[0][1]:.4f}" if candidates else "none",
         (perf_counter() - started) * 1000,
@@ -259,6 +273,10 @@ def rerank_candidates(
             chunk_index=int(document.metadata.get("chunk_index", 0)),
             # 从 metadata 读取来源文件，缺失时使用 unknown。
             source=str(document.metadata.get("source", "unknown")),
+            # 从 metadata 读取知识分类。
+            category=str(document.metadata.get("category", "通用")),
+            # 从 metadata 读取可读 Point 名称。
+            point_name=str(document.metadata.get("point_name", "unknown")),
         )
         # 对排序结果做嵌套解包，获得 Document、两个分数。
         for (document, vector_score), rerank_score in ranked_results
@@ -266,10 +284,10 @@ def rerank_candidates(
 
 
 # 定义完整检索函数，串联 Qdrant 召回和 Cross-Encoder 重排。
-def retrieve(question: str) -> list[SearchHit]:
+def retrieve(question: str, category: str = "全部") -> list[SearchHit]:
     """先从 Qdrant 召回候选，再返回重排后的最终片段。"""
     # 先执行第一阶段召回，再把结果交给第二阶段重排。
-    return rerank_candidates(question, retrieve_candidates(question))
+    return rerank_candidates(question, retrieve_candidates(question, category))
 
 
 # 定义 Query Rewrite 函数，把口语化问题转换成更适合向量召回的独立查询。
@@ -380,7 +398,7 @@ def generate(question: str, hits: list[SearchHit], chat_history: str = "（无�
 
 
 # 定义问答总入口，由 FastAPI /ask 调用。
-def ask(question: str) -> tuple[str, list[SearchHit], str]:
+def ask(question: str, category: str = "全部") -> tuple[str, list[SearchHit], str]:
     # 记录完整问答流程开始时间。
     started = perf_counter()
     # 输出请求开始日志；repr 可以清晰显示问题边界和换行。
@@ -388,7 +406,7 @@ def ask(question: str) -> tuple[str, list[SearchHit], str]:
     # 先把原始问题改写成语义更完整的向量检索查询。
     rewritten_query = rewrite_query(question)
     # 使用改写查询执行 Qdrant 召回，再使用原始问题进行 Reranker 重排。
-    hits = rerank_candidates(question, retrieve_candidates(rewritten_query))
+    hits = rerank_candidates(question, retrieve_candidates(rewritten_query, category))
     # 如果没有片段通过阈值，则不调用 Qwen，直接返回明确拒答。
     if not hits:
         # 记录没有候选通过阈值以及整个拒答流程耗时。

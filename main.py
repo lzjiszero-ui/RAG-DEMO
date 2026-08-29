@@ -48,6 +48,8 @@ app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 class AskRequest(BaseModel):
     # question 必须为 1 到 1000 个字符的字符串。
     question: str = Field(min_length=1, max_length=1000)
+    # “全部”表示跨分类检索，其他值用于构造 Qdrant Metadata Filter。
+    category: str = Field(default="全部", min_length=1, max_length=100)
 
 
 # 定义多轮聊天请求，在问题之外携带会话标识。
@@ -68,6 +70,10 @@ class Source(BaseModel):
     chunk_index: int
     # 片段的来源文件名。
     source: str
+    # 当前片段所属知识分类。
+    category: str = "通用"
+    # 导入时生成的可读 Point 名称。
+    point_name: str = "unknown"
 
 
 # 定义 POST /ask 的完整响应结构。
@@ -86,17 +92,25 @@ def stream_line(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False) + "\n"
 
 
+# 将浏览器会话和知识分类组合，防止不同分类之间共享聊天上下文。
+def scoped_session_id(session_id: str, category: str) -> str:
+    # 使用不可出现在浏览器 session_id 中的双冒号作为分隔符。
+    return f"{session_id}::{category}"
+
+
 # 定义流式 RAG 执行器，每到一个真实阶段就向浏览器发送状态。
-def ask_event_stream(question: str, session_id: str):
+def ask_event_stream(question: str, session_id: str, category: str = "全部"):
     """按 Query Rewrite、召回、重排、生成的顺序输出 NDJSON 事件。"""
     # 从收到问题开始记录总耗时，覆盖改写、召回、重排和生成阶段。
     started = perf_counter()
-    # 读取该会话之前保存的问答轮次。
-    history = get_history(session_id)
+    # 为当前会话和分类生成隔离的内存 Key。
+    memory_id = scoped_session_id(session_id, category)
+    # 读取该分类会话之前保存的问答轮次。
+    history = get_history(memory_id)
     # 把结构化历史转换成两个 Prompt 都能读取的文本。
     chat_history = format_history(history)
     # 告诉页面当前有多少轮历史被用于理解问题。
-    yield stream_line({"type": "status", "step": "memory", "state": "completed", "message": f"已加载 {len(history)} 轮历史对话", "history_turns": len(history)})
+    yield stream_line({"type": "status", "step": "memory", "state": "completed", "message": f"分类：{category} · 已加载 {len(history)} 轮历史对话", "history_turns": len(history), "category": category})
     # 通知前端 Query Rewrite 已开始，并告知 reasoning 配置。
     yield stream_line({"type": "status", "step": "rewrite", "state": "running", "message": "正在改写检索问题", "reasoning_enabled": QUERY_REWRITE_REASONING})
     # 调用 Qwen 完成查询改写。
@@ -108,7 +122,7 @@ def ask_event_stream(question: str, session_id: str):
     # 通知前端 Qdrant 向量召回已开始。
     yield stream_line({"type": "status", "step": "retrieve", "state": "running", "message": "正在执行 Qdrant 向量召回"})
     # 使用改写后的查询召回候选片段。
-    candidates = retrieve_candidates(rewritten_query)
+    candidates = retrieve_candidates(rewritten_query, category)
     # 返回候选数量和最高向量分数。
     yield stream_line({"type": "status", "step": "retrieve", "state": "completed", "message": f"召回 {len(candidates)} 个候选片段", "candidate_count": len(candidates), "top_score": float(candidates[0][1]) if candidates else None})
     # 没有候选时直接返回拒答，不再加载 Reranker 或调用生成模型。
@@ -116,9 +130,9 @@ def ask_event_stream(question: str, session_id: str):
         # 构造没有相关资料时的拒答文本。
         answer = "知识库中没有找到足够相关的资料。"
         # 拒答也属于完整一轮会话，保存后续问题可能需要的上下文。
-        append_turn(session_id, ChatTurn(question=question, answer=answer, rewritten_query=rewritten_query))
+        append_turn(memory_id, ChatTurn(question=question, answer=answer, rewritten_query=rewritten_query))
         # 输出无命中的最终结果。
-        yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id})
+        yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": category})
         # 结束生成器。
         return
     # 通知前端 Cross-Encoder 重排已开始。
@@ -134,9 +148,9 @@ def ask_event_stream(question: str, session_id: str):
     # 通知前端生成阶段已经结束。
     yield stream_line({"type": "status", "step": "generate", "state": "completed", "message": "回答生成完成"})
     # 将当前问答保存到所属会话，供下一轮理解指代。
-    append_turn(session_id, ChatTurn(question=question, answer=answer, rewritten_query=rewritten_query))
+    append_turn(memory_id, ChatTurn(question=question, answer=answer, rewritten_query=rewritten_query))
     # 把最终答案、改写查询和来源作为最后一个事件返回。
-    yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [hit.__dict__ for hit in hits], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id})
+    yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [hit.__dict__ for hit in hits], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": category})
 
 
 # 注册首页 GET 路由，并从 Swagger 中隐藏该页面路由。
@@ -176,7 +190,7 @@ def ask_endpoint(request: AskRequest) -> AskResponse:
     # 捕获检索、重排或模型调用阶段可能产生的异常。
     try:
         # 把校验后的问题交给 RAG，并取得答案与来源。
-        answer, hits, rewritten_query = ask(request.question)
+        answer, hits, rewritten_query = ask(request.question, request.category)
     # 捕获业务流程中的未处理异常。
     except Exception as exc:
         # 输出完整异常堆栈，方便定位 Ollama、Qdrant 或代码错误。
@@ -205,7 +219,7 @@ def ask_stream_endpoint(request: ChatRequest) -> StreamingResponse:
     # 返回 NDJSON 响应；浏览器每收到一行就能立即刷新进度。
     return StreamingResponse(
         # 把问题交给流式 RAG 生成器。
-        ask_event_stream(request.question, request.session_id),
+        ask_event_stream(request.question, request.session_id, request.category),
         # 声明内容类型为逐行 JSON，并使用 UTF-8 中文。
         media_type="application/x-ndjson; charset=utf-8",
     )
@@ -214,19 +228,33 @@ def ask_stream_endpoint(request: ChatRequest) -> StreamingResponse:
 # 注册会话历史读取接口，页面刷新后可以恢复已有消息。
 @app.get("/chat/{session_id}")
 # 定义历史读取处理函数。
-def chat_history_endpoint(session_id: str) -> dict:
-    # 返回会话标识和按时间排序的历史轮次。
-    return {"session_id": session_id, "turns": serialize_history(session_id)}
+def chat_history_endpoint(session_id: str, category: str = "全部") -> dict:
+    # 返回会话标识、分类和按时间排序的隔离历史轮次。
+    return {"session_id": session_id, "category": category, "turns": serialize_history(scoped_session_id(session_id, category))}
 
 
 # 注册新建会话时调用的历史清除接口。
 @app.delete("/chat/{session_id}")
 # 定义历史清除处理函数。
-def clear_chat_endpoint(session_id: str) -> dict[str, str]:
-    # 从进程内存中删除指定会话。
-    clear_history(session_id)
+def clear_chat_endpoint(session_id: str, category: str = "全部") -> dict[str, str]:
+    # 从进程内存中删除指定会话分类的历史。
+    clear_history(scoped_session_id(session_id, category))
     # 返回明确状态供前端确认。
-    return {"status": "cleared", "session_id": session_id}
+    return {"status": "cleared", "session_id": session_id, "category": category}
+
+
+# 注册知识分类列表接口，页面不需要硬编码未来新增的一级目录。
+@app.get("/categories")
+# 扫描 knowledge 根目录并返回可选择分类。
+def categories_endpoint() -> dict[str, list[str]]:
+    # 定位知识文件目录。
+    knowledge_dir = Path(__file__).with_name("knowledge")
+    # 根目录 TXT 属于“通用”，一级子目录名作为其他分类。
+    categories = {"通用"} if any(knowledge_dir.glob("*.txt")) else set()
+    # 只添加实际包含 TXT 文件的一级子目录。
+    categories.update(path.name for path in knowledge_dir.iterdir() if path.is_dir() and any(path.rglob("*.txt")))
+    # “全部”固定排在第一项，其余分类按名称排序。
+    return {"categories": ["全部", *sorted(categories)]}
 
 
 # 注册检索评估 POST 路由。

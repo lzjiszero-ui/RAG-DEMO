@@ -17,14 +17,14 @@ def test_load_documents_keeps_source_and_chunk_index(tmp_path: Path) -> None:
     documents = load_documents(tmp_path)
 
     assert [document.metadata for document in documents] == [
-        {"source": "first.txt", "chunk_index": 0},
-        {"source": "nested/second.txt", "chunk_index": 0},
+        {"source": "first.txt", "category": "通用", "point_name": "first-1", "chunk_index": 0},
+        {"source": "nested/second.txt", "category": "nested", "point_name": "second-1", "chunk_index": 0},
     ]
 
 
 def test_ask_does_not_call_model_when_nothing_passes_threshold(monkeypatch) -> None:
     monkeypatch.setattr(rag, "rewrite_query", lambda question: "rewritten question")
-    monkeypatch.setattr(rag, "retrieve_candidates", lambda question: [])
+    monkeypatch.setattr(rag, "retrieve_candidates", lambda question, category: [])
 
     answer, hits, rewritten_query = ask("unrelated question")
 
@@ -98,3 +98,20 @@ def test_retrieve_sorts_candidates_by_reranker_score(monkeypatch) -> None:
     assert [hit.source for hit in hits] == ["second.txt", "first.txt"]
     assert hits[0].vector_score == 0.8
     assert hits[0].rerank_score == 3.0
+
+
+def test_retrieve_candidates_applies_category_metadata_filter(monkeypatch) -> None:
+    captured = {}
+
+    class FakeVectorStore:
+        def similarity_search_with_score(self, **kwargs):
+            captured.update(kwargs)
+            return []
+
+    monkeypatch.setattr(rag, "vector_store", lambda: FakeVectorStore())
+
+    rag.retrieve_candidates("宋江是谁", "水浒传")
+
+    category_filter = captured["filter"]
+    assert category_filter.must[0].key == "metadata.category"
+    assert category_filter.must[0].match.value == "水浒传"

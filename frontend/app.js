@@ -30,6 +30,8 @@ const reasoningStatus = document.querySelector("#reasoning-status");
 const chatHistoryElement = document.querySelector("#chat-history");
 // 获取新建会话按钮。
 const newChatButton = document.querySelector("#new-chat");
+// 获取知识分类选择框，用于限制 Qdrant 只检索指定分类。
+const categorySelect = document.querySelector("#category");
 // 获取顶部 Ollama/Qdrant 服务状态区域。
 const serviceStatus = document.querySelector("#service-status");
 // 获取“知识问答”标签按钮。
@@ -112,8 +114,10 @@ function appendChatMessage(role, text) {
 
 // 从后端内存恢复当前会话已有的历史消息。
 async function loadChatHistory() {
+  // 每次切换分类都先恢复空状态，防止残留其他分类的聊天内容。
+  chatHistoryElement.innerHTML = '<p class="chat-empty">当前是新会话，提出第一个问题吧。</p>';
   // 请求 session_id 对应的历史。
-  const response = await fetch(`/chat/${encodeURIComponent(sessionId)}`);
+  const response = await fetch(`/chat/${encodeURIComponent(sessionId)}?category=${encodeURIComponent(categorySelect.value)}`);
   // 请求失败时保留新会话空状态，不阻断页面其他功能。
   if (!response.ok) return;
   // 解析历史响应。
@@ -125,6 +129,29 @@ async function loadChatHistory() {
     appendChatMessage("user", turn.question);
     appendChatMessage("assistant", turn.answer);
   });
+}
+
+// 从后端读取实际存在的知识分类并填充下拉框。
+async function loadCategories() {
+  // 请求由 knowledge 目录动态生成的分类列表。
+  const response = await fetch("/categories");
+  // 请求失败时保留 HTML 中的“全部”选项。
+  if (!response.ok) return;
+  // 解析分类数组。
+  const payload = await response.json();
+  // 读取用户上次选择，刷新后继续使用同一分类。
+  const savedCategory = localStorage.getItem("rag_category") || "全部";
+  // 清空硬编码占位项，由接口返回值完整重建。
+  categorySelect.innerHTML = "";
+  // 使用 DOM API 创建选项，避免分类名被当成 HTML。
+  payload.categories.forEach((category) => {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    categorySelect.appendChild(option);
+  });
+  // 只有保存的分类仍存在时才恢复，否则使用“全部”。
+  categorySelect.value = payload.categories.includes(savedCategory) ? savedCategory : "全部";
 }
 
 // 根据 view 参数切换问答面板内部状态。
@@ -189,7 +216,7 @@ function renderSources(sources) {
     <article class="source-card">
       <!-- 显示来源、片段编号和两个检索分数。 -->
       <div class="source-meta">
-        <span class="source-name">[Reference ${index + 1}] ${escapeHtml(source.source)} · chunk ${source.chunk_index}</span>
+        <span class="source-name">[Reference ${index + 1}] ${escapeHtml(source.category)} · ${escapeHtml(source.point_name)} · ${escapeHtml(source.source)}</span>
         <span class="source-scores">${source.vector_score.toFixed(4)} / ${source.rerank_score.toFixed(4)}</span>
       </div>
       <!-- 显示经过 HTML 转义的知识片段正文。 -->
@@ -308,7 +335,7 @@ askForm.addEventListener("submit", async (event) => {
       // 声明请求体是 JSON。
       headers: { "Content-Type": "application/json" },
       // 把问题和当前会话 ID 转换成 JSON 字符串。
-      body: JSON.stringify({ question, session_id: sessionId }),
+      body: JSON.stringify({ question, session_id: sessionId, category: categorySelect.value }),
     });
     // 非 2xx 响应直接读取错误文字并进入 catch。
     if (!response.ok) throw new Error(await response.text() || "请求失败");
@@ -380,7 +407,7 @@ askForm.addEventListener("submit", async (event) => {
 // 点击“新建会话”时清除后端旧历史并生成新的 session_id。
 newChatButton.addEventListener("click", async () => {
   // 请求后端删除当前会话的内存历史。
-  await fetch(`/chat/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+  await fetch(`/chat/${encodeURIComponent(sessionId)}?category=${encodeURIComponent(categorySelect.value)}`, { method: "DELETE" });
   // 创建全新的浏览器会话标识。
   sessionId = crypto.randomUUID();
   // 保存新标识供刷新页面后继续使用。
@@ -393,6 +420,17 @@ newChatButton.addEventListener("click", async () => {
   setView("empty");
   // 把输入焦点交还给用户。
   questionInput.focus();
+});
+
+// 切换分类时读取该分类独立的聊天记录，并清空上一分类的答案面板。
+categorySelect.addEventListener("change", async () => {
+  // 保存分类选择供刷新页面后恢复。
+  localStorage.setItem("rag_category", categorySelect.value);
+  // 加载 session_id 与当前分类组合后的独立历史。
+  await loadChatHistory();
+  // 清空问题并恢复等待状态，避免误把旧答案理解为当前分类结果。
+  questionInput.value = "";
+  setView("empty");
 });
 
 // 查找所有带 data-question 的示例问题按钮。
@@ -449,5 +487,5 @@ runEvaluationButton.addEventListener("click", async () => {
 
 // 页面加载后立即检查 Ollama 和 Qdrant 是否可用。
 checkHealth();
-// 页面加载后恢复当前 session_id 的历史消息。
-loadChatHistory();
+// 页面加载后先取得分类，再恢复当前分类与 session_id 对应的历史消息。
+loadCategories().then(loadChatHistory);

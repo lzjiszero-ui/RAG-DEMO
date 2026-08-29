@@ -48,7 +48,16 @@
       <section class="workspace" id="qa-view">
         <!-- 提问表单负责收集问题和触发 /ask。 -->
         <form class="question-card" id="ask-form">
-          <div class="chat-toolbar"><label for="question">你的问题</label><button id="new-chat" type="button">＋ 新建会话</button></div>
+          <div class="chat-toolbar">
+            <label for="question">你的问题</label>
+            <div class="chat-actions">
+              <label class="category-label" for="category">知识分类</label>
+              <select id="category" name="category" aria-label="选择知识分类">
+                <option value="全部">全部</option>
+              </select>
+              <button id="new-chat" type="button">＋ 新建会话</button>
+            </div>
+          </div>
           <!-- 当前 session_id 已保存的多轮问答显示在这里。 -->
           <div class="chat-history" id="chat-history"><p class="chat-empty">当前是新会话，提出第一个问题吧。</p></div>
           <textarea id="question" name="question" maxlength="1000" rows="4" placeholder="例如：LangChain 中的 Document 包含什么？" required></textarea>

@@ -27,7 +27,7 @@ def test_evaluate_endpoint(monkeypatch) -> None:
 
 
 def test_ask_endpoint_returns_rewritten_query(monkeypatch) -> None:
-    monkeypatch.setattr(main, "ask", lambda question: ("answer", [], "rewritten query"))
+    monkeypatch.setattr(main, "ask", lambda question, category: ("answer", [], "rewritten query"))
 
     response = client.post("/ask", json={"question": "original question"})
 
@@ -43,7 +43,7 @@ def test_ask_stream_reports_real_pipeline_steps(monkeypatch) -> None:
     candidate = (Document(page_content="context", metadata={"source": "guide.txt", "chunk_index": 0}), 0.8)
     hit = SearchHit(text="context", vector_score=0.8, rerank_score=0.9, chunk_index=0, source="guide.txt")
     monkeypatch.setattr(main, "rewrite_query", lambda question, history: "rewritten query")
-    monkeypatch.setattr(main, "retrieve_candidates", lambda question: [candidate])
+    monkeypatch.setattr(main, "retrieve_candidates", lambda question, category: [candidate])
     monkeypatch.setattr(main, "rerank_candidates", lambda question, candidates: [hit])
     monkeypatch.setattr(main, "generate", lambda question, hits, history: "streamed answer")
 
@@ -78,7 +78,7 @@ def test_second_turn_receives_first_turn_history(monkeypatch) -> None:
         return question
 
     monkeypatch.setattr(main, "rewrite_query", fake_rewrite)
-    monkeypatch.setattr(main, "retrieve_candidates", lambda question: [candidate])
+    monkeypatch.setattr(main, "retrieve_candidates", lambda question, category: [candidate])
     monkeypatch.setattr(main, "rerank_candidates", lambda question, candidates: [hit])
     monkeypatch.setattr(main, "generate", lambda question, hits, history: f"answer for {question}")
 
@@ -96,3 +96,26 @@ def test_second_turn_receives_first_turn_history(monkeypatch) -> None:
     clear_response = client.delete("/chat/multi-turn-test")
     assert clear_response.json()["status"] == "cleared"
     assert client.get("/chat/multi-turn-test").json()["turns"] == []
+
+
+def test_categories_endpoint_lists_knowledge_folders() -> None:
+    response = client.get("/categories")
+
+    assert response.status_code == 200
+    assert response.json()["categories"] == ["全部", "水浒传", "西游记", "通用"]
+
+
+def test_chat_history_is_isolated_by_category(monkeypatch) -> None:
+    candidate = (Document(page_content="context", metadata={"source": "book.txt", "category": "水浒传", "point_name": "水浒传-1", "chunk_index": 0}), 0.8)
+    hit = SearchHit(text="context", vector_score=0.8, rerank_score=0.9, chunk_index=0, source="book.txt", category="水浒传", point_name="水浒传-1")
+    monkeypatch.setattr(main, "rewrite_query", lambda question, history: question)
+    monkeypatch.setattr(main, "retrieve_candidates", lambda question, category: [candidate])
+    monkeypatch.setattr(main, "rerank_candidates", lambda question, candidates: [hit])
+    monkeypatch.setattr(main, "generate", lambda question, hits, history: "水浒传答案")
+
+    client.delete("/chat/category-test?category=水浒传")
+    client.delete("/chat/category-test?category=西游记")
+    client.post("/ask/stream", json={"question": "人物是谁", "session_id": "category-test", "category": "水浒传"})
+
+    assert len(client.get("/chat/category-test?category=水浒传").json()["turns"]) == 1
+    assert client.get("/chat/category-test?category=西游记").json()["turns"] == []

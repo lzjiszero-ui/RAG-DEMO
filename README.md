@@ -3,7 +3,7 @@
 这是一个使用 LangChain 组件实现核心流程的 RAG 示例：
 
 ```text
-knowledge/*.txt（多个文件）
+knowledge/*.txt 与 knowledge/分类名/*.txt（多个文件）
   → RecursiveCharacterTextSplitter 分块
   → OllamaEmbeddings（bge-m3）生成 Embedding
   → QdrantVectorStore 保存向量
@@ -11,7 +11,7 @@ knowledge/*.txt（多个文件）
 用户问题
   → 根据 session_id 加载最近的多轮对话
   → ChatOllama（qwen3.5:4b）执行 Query Rewrite
-  → QdrantVectorStore 召回候选 Document
+  → 可选 Qdrant Metadata Filter 按分类召回候选 Document
   → bge-reranker-base 对候选结果重新排序
   → ChatPromptTemplate 注入参考资料
   → ChatOllama（qwen3.5:4b）根据资料回答
@@ -45,7 +45,16 @@ uv sync
 uv run python ingest.py
 ```
 
-把 `.txt` 文件放入 `knowledge/` 目录（支持子目录），然后执行导入。这一步会重建 Qdrant 中的 `simple_rag_docs` Collection，但不会影响其他项目的 Collection。
+把 `.txt` 文件放入 `knowledge/` 目录，然后执行导入。这一步会重建 Qdrant 中的 `simple_rag_docs` Collection，但不会影响其他项目的 Collection。根目录文件归为“通用”，一级子目录名会成为分类，例如：
+
+```text
+knowledge/
+├─ rag_basics.txt          → 通用
+├─ 水浒传/水浒传.txt       → 水浒传
+└─ 西游记/西游记.txt       → 西游记
+```
+
+每个 Qdrant Point 的 Payload 会保存 `metadata.category`、`metadata.source`、`metadata.point_name` 和 `metadata.chunk_index`。页面选择具体分类后，后端会用 `metadata.category` Filter 限制向量检索；选择“全部”时不添加 Filter。不同分类的多轮聊天上下文也会相互隔离。
 
 文本分块参数可在 `.env` 中调整：
 

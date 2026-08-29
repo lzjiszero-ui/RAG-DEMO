@@ -25,7 +25,11 @@ def load_documents(knowledge_dir: Path) -> list[Document]:
     # 递归查找所有 .txt 文件，并排序以保证每次导入顺序稳定。
     for path in sorted(knowledge_dir.rglob("*.txt")):
         # 计算相对 knowledge 目录的路径，作为可读的 source 元数据。
-        source = path.relative_to(knowledge_dir).as_posix()
+        relative_path = path.relative_to(knowledge_dir)
+        # 使用一级子目录作为知识分类；根目录文件归入“通用”。
+        category = relative_path.parts[0] if len(relative_path.parts) > 1 else "通用"
+        # 将相对路径转换成跨平台统一的 source 字符串。
+        source = relative_path.as_posix()
         # 以 UTF-8 读取文件，并调用文本切分器生成多个字符串切片。
         chunks = split_text(path.read_text(encoding="utf-8"))
         # 输出当前知识文件产生的切片数量。
@@ -36,8 +40,13 @@ def load_documents(knowledge_dir: Path) -> list[Document]:
             Document(
                 # 将当前切片正文保存到 LangChain 的标准正文字段。
                 page_content=chunk,
-                # 记录来源文件和当前文件内的切片序号。
-                metadata={"source": source, "chunk_index": index},
+                # 记录来源、分类、可读 Point 名称和当前文件内的切片序号。
+                metadata={
+                    "source": source,
+                    "category": category,
+                    "point_name": f"{path.stem}-{index + 1}",
+                    "chunk_index": index,
+                },
             )
             # enumerate 同时产生从 0 开始的编号和对应切片。
             for index, chunk in enumerate(chunks)

@@ -63,6 +63,7 @@ knowledge/
 CHUNK_SIZE=500
 CHUNK_OVERLAP=80
 SCORE_THRESHOLD=0.5
+CATEGORY_SCORE_THRESHOLD=0.3
 RETRIEVAL_K=10
 TOP_K=3
 RERANKER_MODEL=BAAI/bge-reranker-base
@@ -76,7 +77,7 @@ QUERY_REWRITE_REASONING=true
 
 `MAX_HISTORY_TURNS=6` 表示每个 `session_id` 最多保留最近 6 轮问答。历史会同时提供给 Query Rewrite 和最终生成 Prompt，因此“它是什么”“上一点再解释一下”这类追问可以结合上下文理解。当前实现使用进程内存保存历史，重启 FastAPI 后会清空；生产环境可进一步替换为 Redis 或数据库。
 
-修改分块参数或知识文件后，需要重新执行导入命令。查询先按 `SCORE_THRESHOLD` 从 Qdrant 召回最多 `RETRIEVAL_K` 条，再由 Reranker 重新评分并保留 `TOP_K` 条。首次查询会下载约 1 GB 的 Reranker 模型到 `.models/`。
+修改分块参数或知识文件后，需要重新执行导入命令。选择“全部”时使用 `SCORE_THRESHOLD`，选择具体分类时使用较宽松的 `CATEGORY_SCORE_THRESHOLD`；Qdrant 最多召回 `RETRIEVAL_K` 条，再由 Reranker 重新评分并保留 `TOP_K` 条。首次查询会下载约 1 GB 的 Reranker 模型到 `.models/`。
 
 ## 3. 启动 API
 
@@ -96,7 +97,7 @@ uv run uvicorn main:app --reload --port 8001
 }
 ```
 
-响应中会同时显示 Query Rewrite 结果、最终答案、来源文件、Qdrant 的 `vector_score` 和重排后的 `rerank_score`。改写查询只用于 Qdrant 召回；Reranker 和最终回答继续使用用户原始问题。改写失败时自动回退到原问题，低于 `SCORE_THRESHOLD` 的片段不会进入重排阶段。
+响应中会同时显示 Query Rewrite 结果、最终答案、来源文件、Qdrant 的 `vector_score` 和重排后的 `rerank_score`。改写查询只用于 Qdrant 召回；Reranker 和最终回答继续使用用户原始问题。改写失败时自动回退到原问题，低于当前检索模式所用阈值的片段不会进入重排阶段。
 
 ## 4. 检索评估
 

@@ -32,6 +32,7 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue
 from config import (
     # 最终生成答案时使用的聊天模型。
     CHAT_MODEL,
+    CATEGORY_SCORE_THRESHOLD,
     # 相邻切片期望重叠的字符数。
     CHUNK_OVERLAP,
     # 单个切片允许的最大字符数。
@@ -187,6 +188,8 @@ def retrieve_candidates(question: str, category: str = "全部") -> list[tuple[D
         # must 表示返回的 Point 必须满足下面的 category 条件。
         must=[FieldCondition(key="metadata.category", match=MatchValue(value=category))]
     )
+    # 具体分类已由 Metadata 限定范围，使用更宽松阈值交给 Reranker 精排。
+    score_threshold = SCORE_THRESHOLD if category == "全部" else CATEGORY_SCORE_THRESHOLD
     # similarity_search_with_score 内部会调用 embed_query(question)。
     candidates = vector_store().similarity_search_with_score(
         # 传入用户的自然语言问题。
@@ -194,14 +197,15 @@ def retrieve_candidates(question: str, category: str = "全部") -> list[tuple[D
         # 最多召回 RETRIEVAL_K 个候选。
         k=RETRIEVAL_K,
         # 过滤低于最低余弦相似度的候选。
-        score_threshold=SCORE_THRESHOLD,
+        score_threshold=score_threshold,
         # 在向量相似度检索前限制允许参与检索的分类。
         filter=category_filter,
     )
     # 输出候选数量、最高分和耗时；没有候选时最高分显示 none。
     logger.info(
-        "qdrant retrieval completed | category=%s | candidates=%d | top_score=%s | elapsed_ms=%.1f",
+        "qdrant retrieval completed | category=%s | threshold=%.3f | candidates=%d | top_score=%s | elapsed_ms=%.1f",
         category,
+        score_threshold,
         len(candidates),
         f"{candidates[0][1]:.4f}" if candidates else "none",
         (perf_counter() - started) * 1000,

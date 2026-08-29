@@ -33,6 +33,8 @@ TOP_K = int(os.getenv("TOP_K", "3"))
 RETRIEVAL_K = int(os.getenv("RETRIEVAL_K", "10"))
 # 读取 Qdrant 最低向量相似度，低于该值的片段会被过滤。
 SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.5"))
+# 读取指定分类时使用的宽松阈值；Metadata 已限制范围，因此可允许更多候选进入 Reranker。
+CATEGORY_SCORE_THRESHOLD = float(os.getenv("CATEGORY_SCORE_THRESHOLD", "0.3"))
 # 读取 Cross-Encoder Reranker 的模型名称。
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
 # 读取每个文本切片允许包含的最大字符数。

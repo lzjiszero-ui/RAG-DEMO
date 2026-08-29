@@ -115,3 +115,20 @@ def test_retrieve_candidates_applies_category_metadata_filter(monkeypatch) -> No
     category_filter = captured["filter"]
     assert category_filter.must[0].key == "metadata.category"
     assert category_filter.must[0].match.value == "水浒传"
+    assert captured["score_threshold"] == rag.CATEGORY_SCORE_THRESHOLD
+
+
+def test_retrieve_candidates_keeps_global_threshold_for_all_categories(monkeypatch) -> None:
+    captured = {}
+
+    class FakeVectorStore:
+        def similarity_search_with_score(self, **kwargs):
+            captured.update(kwargs)
+            return []
+
+    monkeypatch.setattr(rag, "vector_store", lambda: FakeVectorStore())
+
+    rag.retrieve_candidates("向量模型是什么", "全部")
+
+    assert captured["filter"] is None
+    assert captured["score_threshold"] == rag.SCORE_THRESHOLD

@@ -84,7 +84,7 @@
               <ol class="pipeline" id="pipeline">
                 <li data-step="memory"><span>1</span><div><b>Chat Memory</b><small>等待执行</small></div></li>
                 <li data-step="rewrite"><span>2</span><div><b>Query Rewrite</b><small id="reasoning-status">Reasoning: ON</small></div></li>
-                <li data-step="retrieve"><span>3</span><div><b>Hybrid Search</b><small>Dense + BM25 + RRF</small></div></li>
+                <li data-step="retrieve"><span>3</span><div><b>Retrieval Mode</b><small>读取 .env 配置</small></div></li>
                 <li data-step="rerank"><span>4</span><div><b>Cross-Encoder</b><small>等待执行</small></div></li>
                 <li data-step="generate"><span>5</span><div><b>Qwen Generation</b><small>等待执行</small></div></li>
               </ol>
@@ -95,7 +95,7 @@
             <!-- 显示 Query Rewrite 后实际用于 Qdrant 召回的查询。 -->
             <div class="rewrite-box"><small>REWRITTEN QUERY</small><p id="rewritten-query"></p></div>
             <article class="answer" id="answer"></article>
-            <div class="sources-heading"><h3>检索依据</h3><span>HYBRID RRF / RERANK</span></div>
+            <div class="sources-heading"><h3>检索依据</h3><span id="retrieval-mode-label">RETRIEVAL SCORE</span></div>
             <div class="source-list" id="source-list"></div>
           </div>
         </section>

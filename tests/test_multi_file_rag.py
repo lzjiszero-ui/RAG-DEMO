@@ -132,3 +132,37 @@ def test_dense_retrieve_candidates_keeps_global_threshold(monkeypatch) -> None:
 
     assert captured["filter"] is None
     assert captured["score_threshold"] == rag.SCORE_THRESHOLD
+
+
+def test_retrieve_mode_candidates_supports_all_four_modes(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(rag, "retrieve_dense_candidates", lambda question, category: calls.append("vector") or [])
+    monkeypatch.setattr(rag, "retrieve_sparse_candidates", lambda question, category: calls.append("bm25") or [])
+    monkeypatch.setattr(rag, "retrieve_candidates", lambda question, category: calls.append("hybrid") or [])
+
+    for mode in ("vector", "bm25", "hybrid", "hybrid_rerank"):
+        monkeypatch.setattr(rag, "RETRIEVAL_MODE", mode)
+        rag.retrieve_mode_candidates("问题", "全部")
+
+    assert calls == ["vector", "bm25", "hybrid", "hybrid"]
+
+
+def test_retrieve_skips_reranker_unless_mode_requires_it(monkeypatch) -> None:
+    document = Document(page_content="context", metadata={"source": "book.txt", "chunk_index": 0})
+    monkeypatch.setattr(rag, "retrieve_mode_candidates", lambda question, category: [(document, 0.8)])
+    monkeypatch.setattr(rag, "rerank_candidates", lambda question, candidates: (_ for _ in ()).throw(AssertionError("reranker should be skipped")))
+    monkeypatch.setattr(rag, "RETRIEVAL_MODE", "hybrid")
+
+    hits = rag.retrieve("问题")
+
+    assert len(hits) == 1
+    assert hits[0].vector_score == 0.8
+    assert hits[0].rerank_score == 0.0
+
+
+def test_bm25_tokenize_adds_chinese_bigrams_and_keeps_technical_terms() -> None:
+    tokens = rag.bm25_tokenize("谁醉打蒋门神？TOP_K").split()
+
+    assert "蒋门" in tokens
+    assert "门神" in tokens
+    assert "top_k" in tokens

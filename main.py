@@ -21,13 +21,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # 导入两个本地服务的配置地址。
-from config import OLLAMA_URL, QDRANT_URL, QUERY_REWRITE_REASONING
+from config import OLLAMA_URL, QDRANT_URL, QUERY_REWRITE_REASONING, RETRIEVAL_MODE
 # 导入内存会话的读取、保存、清除和 Prompt 格式化工具。
 from chat_memory import ChatTurn, append_turn, clear_history, format_history, get_history, serialize_history
 # 导入检索评估主函数。
 from evaluation import evaluate
 # 导入完整 RAG 问答入口。
-from rag import ask, generate, rerank_candidates, retrieve_candidates, rewrite_query
+from rag import ask, candidates_to_hits, generate, rerank_candidates, retrieve_mode_candidates, rewrite_query
 # 导入统一日志初始化函数。
 from logging_config import configure_logging
 
@@ -120,9 +120,9 @@ def ask_event_stream(question: str, session_id: str, category: str = "全部"):
     # 返回实际用于 Qdrant 的查询。
     yield stream_line({"type": "status", "step": "rewrite", "state": "completed", "message": "查询改写完成", "detail": rewritten_query})
     # 通知前端 Qdrant 向量召回已开始。
-    yield stream_line({"type": "status", "step": "retrieve", "state": "running", "message": "正在执行 Dense + BM25 Hybrid Search"})
+    yield stream_line({"type": "status", "step": "retrieve", "state": "running", "message": f"正在执行 {RETRIEVAL_MODE} 检索", "retrieval_mode": RETRIEVAL_MODE})
     # 使用改写后的查询召回候选片段。
-    candidates = retrieve_candidates(rewritten_query, category)
+    candidates = retrieve_mode_candidates(rewritten_query, category)
     # 返回候选数量和最高 RRF 融合分数。
     yield stream_line({"type": "status", "step": "retrieve", "state": "completed", "message": f"召回 {len(candidates)} 个候选片段", "candidate_count": len(candidates), "top_score": float(candidates[0][1]) if candidates else None})
     # 没有候选时直接返回拒答，不再加载 Reranker 或调用生成模型。
@@ -132,15 +132,17 @@ def ask_event_stream(question: str, session_id: str, category: str = "全部"):
         # 拒答也属于完整一轮会话，保存后续问题可能需要的上下文。
         append_turn(memory_id, ChatTurn(question=question, answer=answer, rewritten_query=rewritten_query))
         # 输出无命中的最终结果。
-        yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": category})
+        yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": category, "retrieval_mode": RETRIEVAL_MODE})
         # 结束生成器。
         return
-    # 通知前端 Cross-Encoder 重排已开始。
-    yield stream_line({"type": "status", "step": "rerank", "state": "running", "message": "正在使用 Cross-Encoder 重排"})
-    # 使用用户原始问题对向量候选重新排序。
-    hits = rerank_candidates(question, candidates)
-    # 返回最终保留的参考数量和最高重排分数。
-    yield stream_line({"type": "status", "step": "rerank", "state": "completed", "message": f"重排完成，保留 {len(hits)} 个参考片段", "reference_count": len(hits), "top_score": hits[0].rerank_score if hits else None})
+    # hybrid_rerank 执行 Cross-Encoder，其他模式直接保留召回排名。
+    if RETRIEVAL_MODE == "hybrid_rerank":
+        yield stream_line({"type": "status", "step": "rerank", "state": "running", "message": "正在使用 Cross-Encoder 重排"})
+        hits = rerank_candidates(question, candidates)
+        yield stream_line({"type": "status", "step": "rerank", "state": "completed", "message": f"重排完成，保留 {len(hits)} 个参考片段", "reference_count": len(hits), "top_score": hits[0].rerank_score if hits else None})
+    else:
+        hits = candidates_to_hits(candidates)
+        yield stream_line({"type": "status", "step": "rerank", "state": "completed", "message": f"{RETRIEVAL_MODE} 模式不执行 Reranker", "reference_count": len(hits), "skipped": True})
     # 通知前端最终回答生成已开始。
     yield stream_line({"type": "status", "step": "generate", "state": "running", "message": "正在让 Qwen 根据参考资料生成回答"})
     # 使用原始问题和重排后的参考资料生成答案。
@@ -150,7 +152,7 @@ def ask_event_stream(question: str, session_id: str, category: str = "全部"):
     # 将当前问答保存到所属会话，供下一轮理解指代。
     append_turn(memory_id, ChatTurn(question=question, answer=answer, rewritten_query=rewritten_query))
     # 把最终答案、改写查询和来源作为最后一个事件返回。
-    yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [hit.__dict__ for hit in hits], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": category})
+    yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [hit.__dict__ for hit in hits], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": category, "retrieval_mode": RETRIEVAL_MODE})
 
 
 # 注册首页 GET 路由，并从 Swagger 中隐藏该页面路由。

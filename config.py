@@ -27,14 +27,17 @@ QUERY_REWRITE_REASONING = os.getenv("QUERY_REWRITE_REASONING", "true").lower() i
 MAX_HISTORY_TURNS = max(1, int(os.getenv("MAX_HISTORY_TURNS", "6")))
 # 读取 Qdrant Collection 名称，用于隔离本项目的向量数据。
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "simple_rag_docs")
+# 读取在线问答检索模式，可选 vector、bm25、hybrid、hybrid_rerank。
+RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "hybrid_rerank").lower()
+# 启动时拒绝未知模式，避免静默使用错误检索策略。
+if RETRIEVAL_MODE not in {"vector", "bm25", "hybrid", "hybrid_rerank"}:
+    raise ValueError("RETRIEVAL_MODE must be one of: vector, bm25, hybrid, hybrid_rerank")
 # 读取重排后最终保留的片段数量，并转换为整数。
 TOP_K = int(os.getenv("TOP_K", "3"))
 # 读取 Qdrant 第一阶段最多召回的候选数量，并转换为整数。
 RETRIEVAL_K = int(os.getenv("RETRIEVAL_K", "10"))
 # 读取 Qdrant 最低向量相似度，低于该值的片段会被过滤。
-SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.5"))
-# 读取指定分类时使用的宽松阈值；Metadata 已限制范围，因此可允许更多候选进入 Reranker。
-CATEGORY_SCORE_THRESHOLD = float(os.getenv("CATEGORY_SCORE_THRESHOLD", "0.3"))
+SCORE_THRESHOLD = float(os.getenv("SCORE_THRESHOLD", "0.3"))
 # 读取 Cross-Encoder Reranker 的模型名称。
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
 # 读取每个文本切片允许包含的最大字符数。

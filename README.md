@@ -63,8 +63,8 @@ knowledge/
 ```dotenv
 CHUNK_SIZE=500
 CHUNK_OVERLAP=80
-SCORE_THRESHOLD=0.5
-CATEGORY_SCORE_THRESHOLD=0.3
+SCORE_THRESHOLD=0.3
+RETRIEVAL_MODE=hybrid_rerank
 RETRIEVAL_K=10
 TOP_K=3
 RERANKER_MODEL=BAAI/bge-reranker-base
@@ -72,13 +72,26 @@ LOG_LEVEL=INFO
 QUERY_REWRITE_REASONING=true
 ```
 
+`RETRIEVAL_MODE` 决定在线问答使用的检索管线：
+
+| 配置值 | 实际流程 | 适用场景 |
+| --- | --- | --- |
+| `vector` | 纯 Dense 向量检索 | 语义相似召回优先 |
+| `bm25` | 纯 BM25 关键词检索 | 编号、字段名和精确词命中 |
+| `hybrid` | Dense + BM25，经 RRF 融合 | 平衡语义与关键词召回 |
+| `hybrid_rerank` | Hybrid 后执行 Cross-Encoder | 更高精度上限，耗时也最高 |
+
+修改 `RETRIEVAL_MODE` 后只需重启 FastAPI，不需要重新执行 `ingest.py`；但 Collection 必须已经包含 Dense 和 Sparse 两种向量。
+
+BM25 写入和查询前会对连续中文生成单字与二元词，例如“蒋门神”会补充“蒋门”“门神”，避免默认空格分词导致纯 `bm25` 模式无法命中中文。修改这段分词规则后需要重新执行 `ingest.py`。
+
 `LOG_LEVEL=INFO` 会输出 Query Rewrite、向量召回、重排、生成和总请求耗时等关键日志。调试时可改为 `DEBUG`，只关注错误时可改为 `ERROR`。日志不会输出 Embedding 向量或完整知识片段。
 
 `QUERY_REWRITE_REASONING=true` 会让 Qwen 在改写查询时启用推理模式；设为 `false` 可降低改写耗时。图形界面通过 `/ask/stream` 接收真实进度事件，会依次显示 Query Rewrite、Qdrant Retrieval、Cross-Encoder 和 Qwen Generation 的执行状态。
 
 `MAX_HISTORY_TURNS=6` 表示每个 `session_id` 最多保留最近 6 轮问答。历史会同时提供给 Query Rewrite 和最终生成 Prompt，因此“它是什么”“上一点再解释一下”这类追问可以结合上下文理解。当前实现使用进程内存保存历史，重启 FastAPI 后会清空；生产环境可进一步替换为 Redis 或数据库。
 
-修改分块参数或知识文件后，需要重新执行导入命令。选择“全部”时使用 `SCORE_THRESHOLD`，选择具体分类时使用较宽松的 `CATEGORY_SCORE_THRESHOLD`；Qdrant 最多召回 `RETRIEVAL_K` 条，再由 Reranker 重新评分并保留 `TOP_K` 条。首次查询会下载约 1 GB 的 Reranker 模型到 `.models/`。
+修改分块参数或知识文件后，需要重新执行导入命令。纯向量模式统一使用 `SCORE_THRESHOLD=0.3`，不再区分“全部”和具体分类阈值；Qdrant 最多召回 `RETRIEVAL_K` 条，`hybrid_rerank` 模式再由 Reranker 重新评分并保留 `TOP_K` 条。首次重排会加载约 1 GB 的 Reranker 模型到 `.models/`。
 
 ## 3. 启动 API
 

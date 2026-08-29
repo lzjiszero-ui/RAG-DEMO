@@ -2,6 +2,8 @@
 
 # 导入 dataclass，用简洁的数据类表示最终检索结果。
 from dataclasses import dataclass
+# 导入正则表达式，用于给 BM25 补充中文字符与二元词分词。
+import re
 # 导入日志模块，用于输出 RAG 各阶段的重要状态。
 import logging
 # 导入 lru_cache，用于缓存已经加载到内存的 Reranker 对象。
@@ -23,6 +25,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 # 导入 Qdrant 向量存储组件，负责写入和检索 Document。
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
+from langchain_qdrant.sparse_embeddings import SparseEmbeddings, SparseVector
 # 导入递归文本切分器，尽量按段落、换行、空格等自然边界切分。
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 # 导入 Qdrant Filter 数据结构，用 metadata.category 限制召回范围。
@@ -33,7 +36,6 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue
 from config import (
     # 最终生成答案时使用的聊天模型。
     CHAT_MODEL,
-    CATEGORY_SCORE_THRESHOLD,
     # 相邻切片期望重叠的字符数。
     CHUNK_OVERLAP,
     # 单个切片允许的最大字符数。
@@ -48,6 +50,8 @@ from config import (
     QDRANT_URL,
     # Query Rewrite 是否开启模型推理模式。
     QUERY_REWRITE_REASONING,
+    # 在线问答使用的检索模式。
+    RETRIEVAL_MODE,
     # Cross-Encoder Reranker 模型名称。
     RERANKER_MODEL,
     # Qdrant 第一阶段最多召回的候选数量。
@@ -69,11 +73,37 @@ def embeddings() -> OllamaEmbeddings:
     return OllamaEmbeddings(model=EMBEDDING_MODEL, base_url=OLLAMA_URL)
 
 
+def bm25_tokenize(text: str) -> str:
+    """把连续中文补充为单字与二元词，让 BM25 可以匹配中文关键词。"""
+    output: list[str] = []
+    for token in re.findall(r"[\u4e00-\u9fff]+|[A-Za-z0-9_.:-]+", text.lower()):
+        if re.fullmatch(r"[\u4e00-\u9fff]+", token):
+            output.extend(token)
+            output.extend(token[index:index + 2] for index in range(len(token) - 1))
+        else:
+            output.append(token)
+    return " ".join(output)
+
+
+class ChineseBM25Sparse(SparseEmbeddings):
+    """在 Qdrant/bm25 前增加中文字符与二元词预处理。"""
+
+    def __init__(self, backend: FastEmbedSparse) -> None:
+        self.backend = backend
+
+    def embed_documents(self, texts: list[str]) -> list[SparseVector]:
+        return self.backend.embed_documents([bm25_tokenize(text) for text in texts])
+
+    def embed_query(self, text: str) -> SparseVector:
+        return self.backend.embed_query(bm25_tokenize(text))
+
+
 @lru_cache(maxsize=1)
-def sparse_embeddings() -> FastEmbedSparse:
-    """返回用于关键词检索的本地 BM25 Sparse Embedding。"""
+def sparse_embeddings() -> SparseEmbeddings:
+    """返回带中文分词预处理的本地 BM25 Sparse Embedding。"""
     cache_dir = Path(__file__).with_name(".models")
-    return FastEmbedSparse(model_name="Qdrant/bm25", cache_dir=str(cache_dir))
+    backend = FastEmbedSparse(model_name="Qdrant/bm25", cache_dir=str(cache_dir))
+    return ChineseBM25Sparse(backend)
 
 
 # 定义文本切分函数，并允许测试或调用方覆盖默认参数。
@@ -187,6 +217,16 @@ def dense_vector_store() -> QdrantVectorStore:
     )
 
 
+def sparse_vector_store() -> QdrantVectorStore:
+    """只查询 BM25 Sparse 向量，用于精确关键词检索。"""
+    return QdrantVectorStore(
+        client=QdrantClient(url=QDRANT_URL),
+        collection_name=COLLECTION_NAME,
+        sparse_embedding=sparse_embeddings(),
+        retrieval_mode=RetrievalMode.SPARSE,
+    )
+
+
 # 缓存一个 Reranker 对象，避免每次提问都重新加载约 1 GB 的模型。
 @lru_cache(maxsize=1)
 # 定义 Reranker 工厂函数。
@@ -236,13 +276,49 @@ def retrieve_dense_candidates(question: str, category: str = "全部") -> list[t
     category_filter = None if category == "全部" else Filter(
         must=[FieldCondition(key="metadata.category", match=MatchValue(value=category))]
     )
-    score_threshold = SCORE_THRESHOLD if category == "全部" else CATEGORY_SCORE_THRESHOLD
     return dense_vector_store().similarity_search_with_score(
         query=question,
         k=RETRIEVAL_K,
-        score_threshold=score_threshold,
+        score_threshold=SCORE_THRESHOLD,
         filter=category_filter,
     )
+
+
+def retrieve_sparse_candidates(question: str, category: str = "全部") -> list[tuple[Document, float]]:
+    """仅使用 BM25 Sparse Embedding 召回关键词匹配片段。"""
+    category_filter = None if category == "全部" else Filter(
+        must=[FieldCondition(key="metadata.category", match=MatchValue(value=category))]
+    )
+    return sparse_vector_store().similarity_search_with_score(
+        query=question,
+        k=RETRIEVAL_K,
+        filter=category_filter,
+    )
+
+
+def retrieve_mode_candidates(question: str, category: str = "全部") -> list[tuple[Document, float]]:
+    """按照 .env 的 RETRIEVAL_MODE 选择在线召回方式。"""
+    if RETRIEVAL_MODE == "vector":
+        return retrieve_dense_candidates(question, category)
+    if RETRIEVAL_MODE == "bm25":
+        return retrieve_sparse_candidates(question, category)
+    return retrieve_candidates(question, category)
+
+
+def candidates_to_hits(documents_with_scores: list[tuple[Document, float]], limit: int = TOP_K) -> list[SearchHit]:
+    """把不需要 Reranker 的原始召回结果转换成页面统一结构。"""
+    return [
+        SearchHit(
+            text=document.page_content,
+            vector_score=float(score),
+            rerank_score=0.0,
+            chunk_index=int(document.metadata.get("chunk_index", 0)),
+            source=str(document.metadata.get("source", "unknown")),
+            category=str(document.metadata.get("category", "通用")),
+            point_name=str(document.metadata.get("point_name", "unknown")),
+        )
+        for document, score in documents_with_scores[:limit]
+    ]
 
 
 # 定义第二阶段重排函数，并允许评估时取消最终数量限制。
@@ -320,9 +396,11 @@ def rerank_candidates(
 
 # 定义完整检索函数，串联 Qdrant 召回和 Cross-Encoder 重排。
 def retrieve(question: str, category: str = "全部") -> list[SearchHit]:
-    """先从 Qdrant 召回候选，再返回重排后的最终片段。"""
-    # 先执行第一阶段召回，再把结果交给第二阶段重排。
-    return rerank_candidates(question, retrieve_candidates(question, category))
+    """按照配置运行召回，并仅在 hybrid_rerank 模式执行 Cross-Encoder。"""
+    candidates = retrieve_mode_candidates(question, category)
+    if RETRIEVAL_MODE == "hybrid_rerank":
+        return rerank_candidates(question, candidates)
+    return candidates_to_hits(candidates)
 
 
 # 定义 Query Rewrite 函数，把口语化问题转换成更适合向量召回的独立查询。
@@ -441,7 +519,10 @@ def ask(question: str, category: str = "全部") -> tuple[str, list[SearchHit], 
     # 先把原始问题改写成语义更完整的向量检索查询。
     rewritten_query = rewrite_query(question)
     # 使用改写查询执行 Qdrant 召回，再使用原始问题进行 Reranker 重排。
-    hits = rerank_candidates(question, retrieve_candidates(rewritten_query, category))
+    # 按配置选择 Dense、BM25 或 Hybrid 召回候选。
+    candidates = retrieve_mode_candidates(rewritten_query, category)
+    # 只有 hybrid_rerank 模式才额外执行 Cross-Encoder。
+    hits = rerank_candidates(question, candidates) if RETRIEVAL_MODE == "hybrid_rerank" else candidates_to_hits(candidates)
     # 如果没有片段通过阈值，则不调用 Qwen，直接返回明确拒答。
     if not hits:
         # 记录没有候选通过阈值以及整个拒答流程耗时。

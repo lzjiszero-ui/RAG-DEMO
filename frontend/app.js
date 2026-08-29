@@ -18,6 +18,8 @@ const answerElement = document.querySelector("#answer");
 const sourceList = document.querySelector("#source-list");
 // 获取参考片段数量文字。
 const sourceCount = document.querySelector("#source-count");
+// 获取来源分数标题，用于显示当前 .env 检索模式。
+const retrievalModeLabel = document.querySelector("#retrieval-mode-label");
 // 获取完整问答流程总耗时的显示元素。
 const totalTimeElement = document.querySelector("#total-time");
 // 获取 Query Rewrite 结果容器，用于展示实际送入 Qdrant 的查询。
@@ -211,7 +213,9 @@ function updatePipeline(event) {
 }
 
 // 把后端 sources 数组渲染成参考来源卡片。
-function renderSources(sources) {
+function renderSources(sources, retrievalMode = "unknown") {
+  // 明确显示本次回答实际采用的运行模式。
+  retrievalModeLabel.textContent = retrievalMode === "hybrid_rerank" ? "HYBRID RRF / RERANK" : `${retrievalMode.toUpperCase()} SCORE`;
   // 显示进入 Prompt 的参考片段总数。
   sourceCount.textContent = `${sources.length} 个参考片段`;
   // 遍历来源并生成卡片 HTML，最后连接成一个字符串。
@@ -221,7 +225,7 @@ function renderSources(sources) {
       <!-- 显示来源、片段编号和两个检索分数。 -->
       <div class="source-meta">
         <span class="source-name">[Reference ${index + 1}] ${escapeHtml(source.category)} · ${escapeHtml(source.point_name)} · ${escapeHtml(source.source)}</span>
-        <span class="source-scores">${source.vector_score.toFixed(4)} / ${source.rerank_score.toFixed(4)}</span>
+        <span class="source-scores">${source.vector_score.toFixed(4)}${retrievalMode === "hybrid_rerank" ? ` / ${source.rerank_score.toFixed(4)}` : ""}</span>
       </div>
       <!-- 显示经过 HTML 转义的知识片段正文。 -->
       <p class="source-text">${escapeHtml(source.text)}</p>
@@ -415,7 +419,7 @@ askForm.addEventListener("submit", async (event) => {
     // 把后端统计的毫秒转换成秒，并保留两位小数。
     totalTimeElement.textContent = `总耗时 ${(payload.elapsed_ms / 1000).toFixed(2)} 秒`;
     // 渲染后端返回的参考来源。
-    renderSources(payload.sources);
+    renderSources(payload.sources, payload.retrieval_mode);
   // 捕获问答请求错误。
   } catch (error) {
     // 给答案区域添加错误样式。

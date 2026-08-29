@@ -107,15 +107,18 @@ uv run uvicorn main:app --reload --port 8001
 
 打开 Swagger：<http://127.0.0.1:8001/docs>
 
-先访问 `GET /health`，再调用 `POST /ask`：
+先访问 `GET /health`，再调用唯一的问答接口 `POST /ask/stream`：
 
 ```json
 {
-  "question": "这个项目怎样查找相关文档？"
+  "question": "这个项目怎样查找相关文档？",
+  "session_id": "demo-session",
+  "category": "全部",
+  "mode": "rag"
 }
 ```
 
-响应中会同时显示 Query Rewrite 结果、最终答案、来源文件、Qdrant 的 `vector_score` 和重排后的 `rerank_score`。改写查询只用于 Qdrant 召回；Reranker 和最终回答继续使用用户原始问题。改写失败时自动回退到原问题，低于当前检索模式所用阈值的片段不会进入重排阶段。
+接口以 NDJSON 流返回执行状态、Query Rewrite 结果、最终答案、来源文件、Qdrant 的 `vector_score` 和重排后的 `rerank_score`。`mode=rag` 执行固定 RAG 管线，`mode=agent` 执行 Agent Tool Calling。改写查询只用于 Qdrant 召回；Reranker 和最终回答继续使用用户原始问题。
 
 ## 4. 检索评估
 
@@ -149,10 +152,10 @@ uv run python evaluation.py
 
 推荐断点顺序：
 
-1. `main.py` 的 `ask_endpoint`
-2. `rag.py` 的 `ask`
-3. `rag.py` 的 `retrieve`
-4. `rag.py` 的 `vector_store`
+1. `main.py` 的 `ask_stream_endpoint`
+2. `main.py` 的 `ask_event_stream` 或 `agent_event_stream`
+3. `rag.py` 的 `retrieve_mode_candidates`
+4. `rag.py` 的 `rerank_candidates`
 5. `rag.py` 的 `generate`
 
 ## 6. 测试

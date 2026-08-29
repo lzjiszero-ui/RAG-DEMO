@@ -16,6 +16,11 @@ def test_frontend_is_served() -> None:
     assert client.get("/static/app.js").status_code == 200
 
 
+def test_removed_non_streaming_ask_endpoint_is_not_registered() -> None:
+    """工程只保留 /ask/stream，旧的非流式 /ask 应返回 404。"""
+    assert client.post("/ask", json={"question": "test"}).status_code == 404
+
+
 def test_evaluate_endpoint(monkeypatch) -> None:
     expected = {"case_count": 1, "summary": {}, "cases": []}
     monkeypatch.setattr(main, "evaluate", lambda: expected)
@@ -24,19 +29,6 @@ def test_evaluate_endpoint(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json() == expected
-
-
-def test_ask_endpoint_returns_rewritten_query(monkeypatch) -> None:
-    monkeypatch.setattr(main, "ask", lambda question, category: ("answer", [], "rewritten query"))
-
-    response = client.post("/ask", json={"question": "original question"})
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "answer": "answer",
-        "rewritten_query": "rewritten query",
-        "sources": [],
-    }
 
 
 def test_ask_stream_reports_real_pipeline_steps(monkeypatch) -> None:

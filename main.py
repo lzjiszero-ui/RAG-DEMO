@@ -28,7 +28,7 @@ from chat_memory import ChatTurn, append_turn, clear_history, format_history, ge
 # 导入检索评估主函数。
 from evaluation import evaluate
 # 导入完整 RAG 问答入口。
-from rag import ask, candidates_to_hits, generate, rerank_candidates, retrieve_mode_candidates, rewrite_query
+from rag import candidates_to_hits, generate, rerank_candidates, retrieve_mode_candidates, rewrite_query
 # 导入统一日志初始化函数。
 from logging_config import configure_logging
 from agent import run_agent
@@ -46,49 +46,18 @@ FRONTEND_DIR = Path(__file__).with_name("frontend")
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 
-# 定义 POST /ask 的请求体结构。
-class AskRequest(BaseModel):
+# 定义页面流式多轮聊天请求结构。
+class ChatRequest(BaseModel):
     # question 必须为 1 到 1000 个字符的字符串。
     question: str = Field(min_length=1, max_length=1000)
     # “全部”表示跨分类检索，其他值用于构造 Qdrant Metadata Filter。
     category: str = Field(default="全部", min_length=1, max_length=100)
 
 
-# 定义多轮聊天请求，在问题之外携带会话标识。
-class ChatRequest(AskRequest):
     # session_id 由浏览器生成，只允许安全的字母、数字、下划线和连字符。
     session_id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     # rag 走固定管线；agent 让 Qwen 自主决定是否以及如何调用工具。
     mode: Literal["rag", "agent"] = "rag"
-
-
-# 定义单个参考来源在 API 中的返回结构。
-class Source(BaseModel):
-    # 检索到的知识片段正文。
-    text: str
-    # Qdrant 计算的向量相似度分数。
-    vector_score: float
-    # Cross-Encoder 计算的重排分数。
-    rerank_score: float
-    # 片段在来源文件中的编号。
-    chunk_index: int
-    # 片段的来源文件名。
-    source: str
-    # 当前片段所属知识分类。
-    category: str = "通用"
-    # 导入时生成的可读 Point 名称。
-    point_name: str = "unknown"
-
-
-# 定义 POST /ask 的完整响应结构。
-class AskResponse(BaseModel):
-    # Qwen 根据参考资料生成的最终回答。
-    answer: str
-    # Query Rewrite 生成并实际送入 Qdrant 的检索查询。
-    rewritten_query: str
-    # 实际进入 Prompt 的参考片段列表。
-    sources: list[Source]
-
 
 # 把一个进度事件转换成一行 JSON，前端可以边接收边解析。
 def stream_line(payload: dict) -> str:
@@ -217,37 +186,6 @@ def health() -> dict[str, str]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     # 两个依赖都正常时返回 ok。
     return {"status": "ok"}
-
-
-# 注册问答 POST 路由，并声明响应模型以生成文档和校验返回值。
-@app.post("/ask", response_model=AskResponse)
-# 定义问答接口处理函数。
-def ask_endpoint(request: AskRequest) -> AskResponse:
-    # 记录接口开始时间。
-    started = perf_counter()
-    # 输出 API 收到请求的日志。
-    logger.info("POST /ask started | question_chars=%d", len(request.question))
-    # 捕获检索、重排或模型调用阶段可能产生的异常。
-    try:
-        # 把校验后的问题交给 RAG，并取得答案与来源。
-        answer, hits, rewritten_query = ask(request.question, request.category)
-    # 捕获业务流程中的未处理异常。
-    except Exception as exc:
-        # 输出完整异常堆栈，方便定位 Ollama、Qdrant 或代码错误。
-        logger.exception("POST /ask failed | elapsed_ms=%.1f", (perf_counter() - started) * 1000)
-        # 将内部错误转换成 HTTP 500，方便前台显示失败原因。
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    # 输出请求完成、命中来源数量和总耗时。
-    logger.info("POST /ask completed | sources=%d | elapsed_ms=%.1f", len(hits), (perf_counter() - started) * 1000)
-    # 使用 Pydantic 模型构造结构化响应。
-    return AskResponse(
-        # 写入模型生成的答案。
-        answer=answer,
-        # 返回改写结果，让前台能够对比原问题和实际检索词。
-        rewritten_query=rewritten_query,
-        # 把每个 SearchHit 字段转换成 Source 模型。
-        sources=[Source(**hit.__dict__) for hit in hits],
-    )
 
 
 # 注册流式问答接口，供图形界面实时显示每个处理阶段。

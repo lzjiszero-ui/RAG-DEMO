@@ -4,7 +4,6 @@ from langchain_core.documents import Document
 
 import rag
 from ingest import load_documents
-from rag import ask
 
 
 def test_load_documents_keeps_source_and_chunk_index(tmp_path: Path) -> None:
@@ -31,17 +30,6 @@ def test_load_documents_adds_contextual_retrieval_text(tmp_path: Path, monkeypat
     assert documents[0].page_content.startswith("文档来源：book.txt\n切片上下文：《水浒传》")
     assert documents[0].metadata["original_text"] == "武松在快活林醉打蒋门神。"
     assert documents[0].metadata["contextualized"] is True
-
-
-def test_ask_does_not_call_model_when_nothing_passes_threshold(monkeypatch) -> None:
-    monkeypatch.setattr(rag, "rewrite_query", lambda question: "rewritten question")
-    monkeypatch.setattr(rag, "retrieve_candidates", lambda question, category: [])
-
-    answer, hits, rewritten_query = ask("unrelated question")
-
-    assert answer == "知识库中没有找到足够相关的资料。"
-    assert hits == []
-    assert rewritten_query == "rewritten question"
 
 
 def test_rewrite_query_returns_model_output(monkeypatch) -> None:

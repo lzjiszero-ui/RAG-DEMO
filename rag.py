@@ -508,30 +508,3 @@ def generate(question: str, hits: list[SearchHit], chat_history: str = "（无�
     logger.info("generation completed | references=%d | answer_chars=%d | elapsed_ms=%.1f", len(hits), len(answer), (perf_counter() - started) * 1000)
     # 返回模型生成的最终答案。
     return answer
-
-
-# 定义问答总入口，由 FastAPI /ask 调用。
-def ask(question: str, category: str = "全部") -> tuple[str, list[SearchHit], str]:
-    # 记录完整问答流程开始时间。
-    started = perf_counter()
-    # 输出请求开始日志；repr 可以清晰显示问题边界和换行。
-    logger.info("rag request started | question=%r", question)
-    # 先把原始问题改写成语义更完整的向量检索查询。
-    rewritten_query = rewrite_query(question)
-    # 使用改写查询执行 Qdrant 召回，再使用原始问题进行 Reranker 重排。
-    # 按配置选择 Dense、BM25 或 Hybrid 召回候选。
-    candidates = retrieve_mode_candidates(rewritten_query, category)
-    # 只有 hybrid_rerank 模式才额外执行 Cross-Encoder。
-    hits = rerank_candidates(question, candidates) if RETRIEVAL_MODE == "hybrid_rerank" else candidates_to_hits(candidates)
-    # 如果没有片段通过阈值，则不调用 Qwen，直接返回明确拒答。
-    if not hits:
-        # 记录没有候选通过阈值以及整个拒答流程耗时。
-        logger.warning("rag request rejected | reason=no_relevant_context | elapsed_ms=%.1f", (perf_counter() - started) * 1000)
-        # 同时返回空来源列表，便于前台正确展示。
-        return "知识库中没有找到足够相关的资料。", [], rewritten_query
-    # 有检索结果时生成最终答案。
-    answer = generate(question, hits)
-    # 输出完整流程的最终耗时和参考数量。
-    logger.info("rag request completed | references=%d | elapsed_ms=%.1f", len(hits), (perf_counter() - started) * 1000)
-    # 把答案、依据和改写查询一起返回。
-    return answer, hits, rewritten_query

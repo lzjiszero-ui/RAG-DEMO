@@ -1,9 +1,0 @@
-Ollama 是一个在本地运行大语言模型和 Embedding 模型的工具。它在本机启动 HTTP 服务后，应用程序可以通过统一的 API 调用已经下载的模型。本项目中的默认地址是 http://127.0.0.1:11434。bge-m3 用于生成文本向量，qwen3.5:4b 用于读取问题和参考资料并生成自然语言回答。两种模型承担不同职责，不能简单地互相替代。
-
-OllamaEmbeddings 是 LangChain 提供的 Ollama Embedding 集成。知识导入时，QdrantVectorStore 会通过它调用 bge-m3，将每个 Document 的 page_content 转换成 1024 维向量。用户提问时，相同组件会把问题转换成同一维度、同一语义空间中的向量。文档和问题必须使用兼容的 Embedding 模型，否则计算出来的相似度没有意义。问题向量只用于当前查询，默认不会作为知识数据保存进 Qdrant。
-
-ChatOllama 是 LangChain 提供的聊天模型集成。它接收 ChatPromptTemplate 产生的 system 和 human 消息，并调用 qwen3.5:4b。在本项目中，system 消息要求模型只根据参考资料回答，并使用 Reference 标明依据；human 消息包含从 Qdrant 取回的 context 和用户原始问题。temperature 设置为零是为了让结果更加稳定，但它不能保证每次输出逐字相同，也不能代替检索质量控制。
-
-在 Windows 上启动 Ollama 图形应用后，API 通常会在后台监听 11434 端口。也可以使用 ollama serve 在终端前台启动服务，这种方式便于直接观察日志。可以访问 /api/version 检查服务是否正常，通过模型列表接口确认 bge-m3 和 qwen3.5:4b 是否已经安装。如果 Ollama 没有运行，知识导入会在生成 Embedding 时失败；问答阶段则可能在问题向量化或聊天生成阶段失败。
-
-模型第一次接收请求时可能需要加载到内存，因此第一次回答通常比后续回答慢。模型大小、CPU、GPU、内存、上下文长度和输入资料数量都会影响速度。RAG 并不会把整个向量数据库发送给聊天模型，只会发送通过检索和阈值过滤的少量文本片段。这样既减少上下文长度，也让模型更集中地根据相关资料回答。

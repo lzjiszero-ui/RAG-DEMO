@@ -14,12 +14,23 @@ def test_load_documents_keeps_source_and_chunk_index(tmp_path: Path) -> None:
     (nested / "second.txt").write_text("second knowledge", encoding="utf-8")
     (tmp_path / "ignored.md").write_text("not imported", encoding="utf-8")
 
-    documents = load_documents(tmp_path)
+    documents = load_documents(tmp_path, contextual_retrieval=False)
 
     assert [document.metadata for document in documents] == [
-        {"source": "first.txt", "category": "通用", "point_name": "first-1", "chunk_index": 0},
-        {"source": "nested/second.txt", "category": "nested", "point_name": "second-1", "chunk_index": 0},
+        {"source": "first.txt", "category": "通用", "point_name": "first-1", "chunk_index": 0, "contextual_summary": "", "original_text": "first knowledge", "contextualized": False},
+        {"source": "nested/second.txt", "category": "nested", "point_name": "second-1", "chunk_index": 0, "contextual_summary": "", "original_text": "second knowledge", "contextualized": False},
     ]
+
+
+def test_load_documents_adds_contextual_retrieval_text(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "book.txt").write_text("武松在快活林醉打蒋门神。", encoding="utf-8")
+    monkeypatch.setattr("ingest.contextualize_chunk", lambda source, document, chunk: "《水浒传》中武松在快活林帮助施恩。")
+
+    documents = load_documents(tmp_path, contextual_retrieval=True)
+
+    assert documents[0].page_content.startswith("文档来源：book.txt\n切片上下文：《水浒传》")
+    assert documents[0].metadata["original_text"] == "武松在快活林醉打蒋门神。"
+    assert documents[0].metadata["contextualized"] is True
 
 
 def test_ask_does_not_call_model_when_nothing_passes_threshold(monkeypatch) -> None:

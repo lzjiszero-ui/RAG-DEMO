@@ -65,6 +65,8 @@ CHUNK_SIZE=500
 CHUNK_OVERLAP=80
 SCORE_THRESHOLD=0.3
 RETRIEVAL_MODE=hybrid_rerank
+CONTEXTUAL_RETRIEVAL=true
+CONTEXTUAL_MAX_DOCUMENT_CHARS=12000
 RETRIEVAL_K=10
 TOP_K=3
 RERANKER_MODEL=BAAI/bge-reranker-base
@@ -84,6 +86,8 @@ QUERY_REWRITE_REASONING=true
 修改 `RETRIEVAL_MODE` 后只需重启 FastAPI，不需要重新执行 `ingest.py`；但 Collection 必须已经包含 Dense 和 Sparse 两种向量。
 
 BM25 写入和查询前会对连续中文生成单字与二元词，例如“蒋门神”会补充“蒋门”“门神”，避免默认空格分词导致纯 `bm25` 模式无法命中中文。修改这段分词规则后需要重新执行 `ingest.py`。
+
+`CONTEXTUAL_RETRIEVAL=true` 会在导入阶段调用本地 Qwen，为每个切片生成不超过 80 字的文档级上下文，再把“来源 + 上下文 + 原始片段”一起生成 Dense 和 Sparse 向量。原文、上下文和是否成功增强会分别保存在 `metadata.original_text`、`metadata.contextual_summary`、`metadata.contextualized`。`CONTEXTUAL_MAX_DOCUMENT_CHARS` 限制提供给模型的完整文档长度。关闭该功能或修改 Prompt 后，需要重新执行 `ingest.py` 才会影响 Collection。
 
 `LOG_LEVEL=INFO` 会输出 Query Rewrite、向量召回、重排、生成和总请求耗时等关键日志。调试时可改为 `DEBUG`，只关注错误时可改为 `ERROR`。日志不会输出 Embedding 向量或完整知识片段。
 

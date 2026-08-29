@@ -21,6 +21,10 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3")
 # 读取聊天模型名称，用于根据参考资料生成答案。
 CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen3.5:4b")
+# 读取导入时是否为每个切片生成文档级上下文。
+CONTEXTUAL_RETRIEVAL = os.getenv("CONTEXTUAL_RETRIEVAL", "true").lower() in {"true", "1", "yes", "on"}
+# 限制交给上下文生成模型的完整文档字符数，避免超出模型上下文窗口。
+CONTEXTUAL_MAX_DOCUMENT_CHARS = max(1000, int(os.getenv("CONTEXTUAL_MAX_DOCUMENT_CHARS", "12000")))
 # 读取 Query Rewrite 是否开启推理模式，并兼容 true、1、yes、on 写法。
 QUERY_REWRITE_REASONING = os.getenv("QUERY_REWRITE_REASONING", "true").lower() in {"true", "1", "yes", "on"}
 # 读取每个会话最多保留的完整问答轮数。

@@ -2,23 +2,57 @@
 
 # 导入 Path，用于递归查找知识文件和处理相对路径。
 from pathlib import Path
+# 导入缓存装饰器，复用上下文生成 Chain 和模型连接。
+from functools import lru_cache
 # 导入日志模块，用于记录文件读取和索引进度。
 import logging
 
 # 导入 LangChain Document，用统一结构保存正文和元数据。
 from langchain_core.documents import Document
+# 导入字符串解析器，把模型消息转换成普通文本。
+from langchain_core.output_parsers import StrOutputParser
+# 导入 Prompt 模板，规定 Contextual Retrieval 的生成规则。
+from langchain_core.prompts import ChatPromptTemplate
+# 导入本地 Ollama 聊天模型，用于给每个切片生成短上下文。
+from langchain_ollama import ChatOllama
 
 # 导入重建索引和文本切分函数。
 from rag import rebuild_index, split_text
 # 导入统一日志初始化函数。
 from logging_config import configure_logging
+# 导入 Contextual Retrieval 开关、文档长度限制和模型配置。
+from config import CHAT_MODEL, CONTEXTUAL_MAX_DOCUMENT_CHARS, CONTEXTUAL_RETRIEVAL, OLLAMA_URL
 
 # 创建当前导入模块的日志记录器。
 logger = logging.getLogger(__name__)
 
 
+@lru_cache(maxsize=1)
+def contextualization_chain():
+    """创建并缓存只负责生成切片上下文的本地 Qwen Chain。"""
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", "你是知识库索引助手。根据文档整体内容，生成一段不超过80字的切片上下文。补充作品名、主题、人物或事件，使片段能独立理解。不要回答问题，不要添加文档外知识，只输出上下文本身。"),
+            ("human", "来源：{source}\n\n完整文档：\n{document}\n\n当前切片：\n{chunk}\n\n切片上下文："),
+        ]
+    )
+    model = ChatOllama(model=CHAT_MODEL, base_url=OLLAMA_URL, temperature=0, reasoning=False, num_predict=120)
+    return prompt | model | StrOutputParser()
+
+
+def contextualize_chunk(source: str, document_text: str, chunk: str) -> str:
+    """结合完整文档为单个切片生成简短的检索上下文。"""
+    try:
+        return contextualization_chain().invoke(
+            {"source": source, "document": document_text[:CONTEXTUAL_MAX_DOCUMENT_CHARS], "chunk": chunk}
+        ).strip()
+    except Exception:
+        logger.exception("contextualization failed | source=%s", source)
+        return ""
+
+
 # 定义多文件加载函数，参数是知识库目录，返回 Document 列表。
-def load_documents(knowledge_dir: Path) -> list[Document]:
+def load_documents(knowledge_dir: Path, contextual_retrieval: bool = CONTEXTUAL_RETRIEVAL) -> list[Document]:
     """创建 LangChain Document，并保留每个切片的来源文件。"""
     # 创建空列表，用于收集所有文件产生的 Document。
     documents: list[Document] = []
@@ -30,27 +64,33 @@ def load_documents(knowledge_dir: Path) -> list[Document]:
         category = relative_path.parts[0] if len(relative_path.parts) > 1 else "通用"
         # 将相对路径转换成跨平台统一的 source 字符串。
         source = relative_path.as_posix()
-        # 以 UTF-8 读取文件，并调用文本切分器生成多个字符串切片。
-        chunks = split_text(path.read_text(encoding="utf-8"))
+        # 以 UTF-8 读取完整文档，供切片和上下文生成共同使用。
+        document_text = path.read_text(encoding="utf-8")
+        # 调用文本切分器生成多个字符串切片。
+        chunks = split_text(document_text)
         # 输出当前知识文件产生的切片数量。
         logger.info("knowledge file loaded | source=%s | chunks=%d", source, len(chunks))
-        # 把当前文件的每个切片转换成 Document，并追加到总列表。
-        documents.extend(
-            # page_content 保存正文；metadata 保存来源和片段编号。
-            Document(
-                # 将当前切片正文保存到 LangChain 的标准正文字段。
-                page_content=chunk,
-                # 记录来源、分类、可读 Point 名称和当前文件内的切片序号。
-                metadata={
-                    "source": source,
-                    "category": category,
-                    "point_name": f"{path.stem}-{index + 1}",
-                    "chunk_index": index,
-                },
+        # 逐个处理切片，因为 Contextual Retrieval 需要分别调用模型。
+        for index, chunk in enumerate(chunks):
+            # 开启时生成文档级上下文；关闭时保留原有索引行为。
+            contextual_summary = contextualize_chunk(source, document_text, chunk) if contextual_retrieval else ""
+            # 把短上下文放在原始片段之前，让 Dense 与 BM25 都能检索到补充信息。
+            indexed_content = f"文档来源：{source}\n切片上下文：{contextual_summary}\n原始片段：{chunk}" if contextual_summary else chunk
+            # 创建包含增强正文和可追踪 Metadata 的 LangChain Document。
+            documents.append(
+                Document(
+                    page_content=indexed_content,
+                    metadata={
+                        "source": source,
+                        "category": category,
+                        "point_name": f"{path.stem}-{index + 1}",
+                        "chunk_index": index,
+                        "contextual_summary": contextual_summary,
+                        "original_text": chunk,
+                        "contextualized": bool(contextual_summary),
+                    },
+                )
             )
-            # enumerate 同时产生从 0 开始的编号和对应切片。
-            for index, chunk in enumerate(chunks)
-        )
     # 返回所有知识文件产生的 Document。
     return documents
 

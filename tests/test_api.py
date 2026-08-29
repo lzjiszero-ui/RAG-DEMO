@@ -102,7 +102,7 @@ def test_categories_endpoint_lists_knowledge_folders() -> None:
     response = client.get("/categories")
 
     assert response.status_code == 200
-    assert response.json()["categories"] == ["全部", "水浒传", "西游记", "通用"]
+    assert response.json()["categories"] == ["全部", "三国演义", "水浒传", "西游记", "通用"]
 
 
 def test_chat_history_is_isolated_by_category(monkeypatch) -> None:

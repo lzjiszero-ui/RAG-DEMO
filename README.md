@@ -50,6 +50,7 @@ uv run python ingest.py
 ```text
 knowledge/
 ├─ rag_basics.txt          → 通用
+├─ 三国演义/三国演义.txt   → 三国演义
 ├─ 水浒传/水浒传.txt       → 水浒传
 └─ 西游记/西游记.txt       → 西游记
 ```

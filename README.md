@@ -81,8 +81,11 @@ MAX_WEB_PAGE_MB=5
 
 - 上传 TXT、PDF、HTML/HTM 文件，每次最多 10 个。
 - 输入公开 HTTP(S) 网页 URL，自动抓取并清理脚本、样式后提取可见正文。
+- 分类下拉框右侧可以新建或删除分类；“通用”分类不可整类删除。
 
 前台导入不会重建整个 Collection。它只删除 `metadata.source` 相同的旧 Point，再写入该来源的新切片，因此其他分类和文件会保留。上传原文件也会保存至 `knowledge/分类名/`，以后执行 `ingest.py` 全量重建时仍然存在。网页抓取会拒绝本机、内网和非 HTML 地址，并分别受 `MAX_WEB_PAGE_MB` 与 `MAX_UPLOAD_MB` 限制。部分依赖 JavaScript 动态渲染或禁止爬取的网站可能无法提取完整正文。
+
+删除分类会精确删除 Qdrant 中 `metadata.category` 等于该分类的 Point，同时删除 `knowledge/分类名/` 目录下的源文件，其他分类不受影响。页面会在执行这个不可恢复的操作前要求确认。
 
 `RETRIEVAL_MODE` 决定在线问答使用的检索管线：
 

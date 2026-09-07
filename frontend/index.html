@@ -122,11 +122,15 @@
           </div>
           <div class="import-category">
             <label for="import-category">知识分类</label>
-            <select id="import-category" aria-label="选择导入分类">
-              <option value="通用">通用</option>
-              <option value="__new__">＋ 新建分类</option>
-            </select>
-            <input id="new-import-category" maxlength="100" placeholder="输入新分类名称" hidden />
+            <div class="category-row">
+              <select id="import-category" aria-label="选择导入分类"><option value="通用">通用</option></select>
+              <button class="secondary-button" id="create-category" type="button">＋ 新建</button>
+              <button class="danger-button" id="delete-category" type="button" disabled>删除</button>
+            </div>
+            <div class="new-category-row" id="new-category-row" hidden>
+              <input id="new-import-category" maxlength="100" placeholder="输入新分类名称" />
+              <button class="secondary-button" id="cancel-new-category" type="button">取消</button>
+            </div>
           </div>
         </div>
         <div class="import-grid">

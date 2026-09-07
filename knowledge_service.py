@@ -12,14 +12,18 @@ import socket
 from pathlib import Path
 # 导入正则表达式，清理分类名和文件名中的危险字符。
 import re
+# 导入目录删除工具，删除分类时同步清理本地源文件。
+import shutil
 # 导入 URL 解析工具，校验协议、主机并生成来源名称。
 from urllib.parse import urljoin, urlparse
 
 # 导入 HTTP 客户端，用于限制超时、重定向和流式读取网页。
 import httpx
+from qdrant_client import QdrantClient
+from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
 
 # 导入上传与网页体积限制。
-from config import MAX_UPLOAD_MB, MAX_WEB_PAGE_MB
+from config import COLLECTION_NAME, MAX_UPLOAD_MB, MAX_WEB_PAGE_MB, QDRANT_URL
 # 复用命令行导入中的文件解析、切片和 Contextual Retrieval。
 from ingest import SUPPORTED_EXTENSIONS, build_documents, extract_text
 # 导入单来源覆盖写入函数。
@@ -150,3 +154,38 @@ def import_url(url: str, category: str) -> dict:
     # 额外保存原始网页 URL，供页面明确展示抓取目标。
     result["url"] = final_url
     return result
+
+
+def delete_category(category: str) -> dict:
+    """删除一个分类的 Qdrant Point 和 knowledge 源文件目录。"""
+    # “全部”不是实际分类，“通用”位于知识库根目录，两者都禁止整类删除。
+    if category in {"全部", "通用"}:
+        raise ValueError("“全部”和“通用”分类不能删除")
+    # 删除操作必须使用未经改变的安全名称，避免路径字符被悄悄替换后误删其他分类。
+    safe_category = safe_name(category, "")
+    if not safe_category or safe_category != category:
+        raise ValueError("分类名称不合法")
+    # 解析绝对路径并再次确认它严格位于 knowledge 根目录之下。
+    knowledge_root = KNOWLEDGE_DIR.resolve()
+    category_dir = (KNOWLEDGE_DIR / safe_category).resolve()
+    if category_dir.parent != knowledge_root:
+        raise ValueError("分类路径不合法")
+    # 构造与检索一致的 metadata.category 精确过滤条件。
+    category_filter = Filter(must=[FieldCondition(key="metadata.category", match=MatchValue(value=safe_category))])
+    client = QdrantClient(url=QDRANT_URL)
+    # Collection 尚未创建时只需要清理本地分类目录。
+    point_count = 0
+    if client.collection_exists(COLLECTION_NAME):
+        # 删除前统计 Point 数量，用于在页面显示明确结果。
+        point_count = int(client.count(collection_name=COLLECTION_NAME, count_filter=category_filter, exact=True).count)
+        # 只删除命中该分类 Filter 的 Point，不影响其他分类。
+        client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=FilterSelector(filter=category_filter),
+            wait=True,
+        )
+    # 删除分类下的源文件，防止以后执行 ingest.py 时被重新写回 Qdrant。
+    if category_dir.is_dir():
+        shutil.rmtree(category_dir)
+    logger.info("knowledge category deleted | category=%s | points=%d", safe_category, point_count)
+    return {"category": safe_category, "deleted_points": point_count}

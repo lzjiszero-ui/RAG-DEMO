@@ -123,6 +123,15 @@ def test_url_import_endpoint(monkeypatch) -> None:
     assert response.json()["item"]["url"] == "https://example.com/article"
 
 
+def test_delete_category_endpoint(monkeypatch) -> None:
+    monkeypatch.setattr(main, "delete_category", lambda category: {"category": category, "deleted_points": 3})
+
+    response = client.delete("/knowledge/categories/测试资料")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "deleted", "category": "测试资料", "deleted_points": 3}
+
+
 def test_chat_history_is_isolated_by_category(monkeypatch) -> None:
     candidate = (Document(page_content="context", metadata={"source": "book.txt", "category": "水浒传", "point_name": "水浒传-1", "chunk_index": 0}), 0.8)
     hit = SearchHit(text="context", vector_score=0.8, rerank_score=0.9, chunk_index=0, source="book.txt", category="水浒传", point_name="水浒传-1")

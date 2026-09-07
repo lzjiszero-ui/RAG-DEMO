@@ -82,10 +82,17 @@ const knowledgeUrl = document.querySelector("#knowledge-url");
 const importCategory = document.querySelector("#import-category");
 // 选择“新建分类”后显示的名称输入框。
 const newImportCategory = document.querySelector("#new-import-category");
+// 获取分类新建、取消、删除按钮及新分类输入行。
+const createCategoryButton = document.querySelector("#create-category");
+const cancelNewCategoryButton = document.querySelector("#cancel-new-category");
+const deleteCategoryButton = document.querySelector("#delete-category");
+const newCategoryRow = document.querySelector("#new-category-row");
 const importResult = document.querySelector("#import-result");
 
 // 读取浏览器保存的会话 ID；第一次访问时创建新的 UUID。
 let sessionId = localStorage.getItem("rag_session_id") || crypto.randomUUID();
+// 记录当前是否使用尚未写入的自定义分类名。
+let creatingImportCategory = false;
 // 保存当前会话 ID，使刷新页面后仍能恢复同一段对话。
 localStorage.setItem("rag_session_id", sessionId);
 
@@ -187,11 +194,13 @@ async function loadCategories() {
   importCategory.innerHTML = payload.categories
     .filter((category) => category !== "全部")
     .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`)
-    .join("") + '<option value="__new__">＋ 新建分类</option>';
+    .join("");
   // 刷新列表时尽量保留用户原来的选择。
   importCategory.value = [...importCategory.options].some((option) => option.value === previousImportCategory)
     ? previousImportCategory
     : "通用";
+  // 通用分类不允许整类删除。
+  deleteCategoryButton.disabled = importCategory.value === "通用";
   // 只有保存的分类仍存在时才恢复，否则使用“全部”。
   categorySelect.value = payload.categories.includes(savedCategory) ? savedCategory : "全部";
 }
@@ -320,7 +329,7 @@ function showImportError(error) {
 
 // 返回当前要写入的分类：已有分类取下拉值，新分类取输入框内容。
 function selectedImportCategory() {
-  return importCategory.value === "__new__" ? newImportCategory.value.trim() : importCategory.value;
+  return creatingImportCategory ? newImportCategory.value.trim() : importCategory.value;
 }
 
 // 把 0 到 1 的指标转换成一位小数百分比。
@@ -581,11 +590,49 @@ knowledgeFiles.addEventListener("change", () => {
   selectedFiles.textContent = names.length ? names.join("、") : "尚未选择文件";
 });
 
-// 选择新建分类时显示文字输入框，切回已有分类时将其隐藏。
+// 切换已有分类时同步删除按钮状态。
 importCategory.addEventListener("change", () => {
-  const creating = importCategory.value === "__new__";
-  newImportCategory.hidden = !creating;
-  if (creating) newImportCategory.focus();
+  deleteCategoryButton.disabled = importCategory.value === "通用";
+});
+
+// 点击新建后在下拉框外显示独立输入行。
+createCategoryButton.addEventListener("click", () => {
+  creatingImportCategory = true;
+  newCategoryRow.hidden = false;
+  importCategory.disabled = true;
+  createCategoryButton.disabled = true;
+  deleteCategoryButton.disabled = true;
+  newImportCategory.focus();
+});
+
+// 取消新建时恢复已有分类下拉框。
+cancelNewCategoryButton.addEventListener("click", () => {
+  creatingImportCategory = false;
+  newCategoryRow.hidden = true;
+  newImportCategory.value = "";
+  importCategory.disabled = false;
+  createCategoryButton.disabled = false;
+  deleteCategoryButton.disabled = importCategory.value === "通用";
+});
+
+// 删除按钮会同时清理分类源文件和 Qdrant 中匹配该分类的 Point。
+deleteCategoryButton.addEventListener("click", async () => {
+  const category = importCategory.value;
+  if (!category || category === "通用") return;
+  if (!window.confirm(`确定删除“${category}”分类吗？\n该分类的源文件和 Qdrant 向量切片都会被删除，此操作无法撤销。`)) return;
+  deleteCategoryButton.disabled = true;
+  showImportLoading(`正在删除“${category}”分类及其向量切片。`);
+  try {
+    const response = await fetch(`/knowledge/categories/${encodeURIComponent(category)}`, { method: "DELETE" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "分类删除失败");
+    importResult.className = "import-result is-success";
+    importResult.innerHTML = `<span class="import-check">✓</span><div><h2>分类已删除</h2><p>${escapeHtml(category)} · 删除 ${payload.deleted_points} 个 Qdrant Point</p></div>`;
+    await loadCategories();
+  } catch (error) {
+    showImportError(error);
+    deleteCategoryButton.disabled = false;
+  }
 });
 
 // 提交本地文件，以 multipart/form-data 保留原始二进制 PDF 内容。
@@ -610,6 +657,11 @@ fileImportForm.addEventListener("submit", async (event) => {
     showImportSuccess(payload.items);
     knowledgeFiles.value = "";
     selectedFiles.textContent = "尚未选择文件";
+    creatingImportCategory = false;
+    newCategoryRow.hidden = true;
+    newImportCategory.value = "";
+    importCategory.disabled = false;
+    createCategoryButton.disabled = false;
     await loadCategories();
   } catch (error) {
     showImportError(error);
@@ -641,6 +693,11 @@ urlImportForm.addEventListener("submit", async (event) => {
     if (!response.ok) throw new Error(payload.detail || "网页导入失败");
     showImportSuccess([payload.item]);
     knowledgeUrl.value = "";
+    creatingImportCategory = false;
+    newCategoryRow.hidden = true;
+    newImportCategory.value = "";
+    importCategory.disabled = false;
+    createCategoryButton.disabled = false;
     await loadCategories();
   } catch (error) {
     showImportError(error);

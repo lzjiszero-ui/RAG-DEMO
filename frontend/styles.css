@@ -202,6 +202,13 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
 .import-category input, .import-category select, .url-field input { width: 100%; padding: 15px 16px; border: 1px solid var(--line); border-radius: 12px; background: #15191d; color: var(--text); outline: none; text-transform: none; letter-spacing: normal; }
 .import-category select { cursor: pointer; color-scheme: dark; }
 .import-category input:focus, .import-category select:focus, .url-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.category-row, .new-category-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+.new-category-row { grid-template-columns: minmax(0, 1fr) auto; }
+.secondary-button, .danger-button { padding: 0 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.04); color: var(--text); cursor: pointer; white-space: nowrap; }
+.secondary-button:hover { border-color: var(--accent); color: var(--accent); }
+.danger-button { border-color: rgba(255,100,100,.35); color: #ff9696; }
+.danger-button:hover:not(:disabled) { border-color: #ff6464; background: rgba(255,100,100,.1); }
+.danger-button:disabled { cursor: not-allowed; opacity: .35; }
 .import-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .import-card { display: flex; min-height: 320px; flex-direction: column; gap: 16px; padding: 28px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel); }
 .import-card h3 { margin: 0; font-size: 24px; }

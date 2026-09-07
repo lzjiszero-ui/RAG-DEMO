@@ -32,7 +32,7 @@ from rag import candidates_to_hits, generate, rerank_candidates, retrieve_mode_c
 # 导入统一日志初始化函数。
 from logging_config import configure_logging
 from agent import run_agent
-from knowledge_service import import_bytes, import_url
+from knowledge_service import delete_category, import_bytes, import_url
 
 # 初始化项目日志格式和级别。
 configure_logging()
@@ -243,6 +243,20 @@ def import_url_endpoint(request: WebImportRequest) -> dict:
         logger.exception("web import failed | url=%s", request.url)
         raise HTTPException(status_code=502, detail=f"导入失败，请检查 Ollama 与 Qdrant：{exc}") from exc
     return {"status": "completed", "item": result}
+
+
+# 注册知识分类删除接口；前端确认后才会调用。
+@app.delete("/knowledge/categories/{category}")
+def delete_category_endpoint(category: str) -> dict:
+    """删除分类源文件及 Qdrant 中该分类的全部 Point。"""
+    try:
+        result = delete_category(category)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("category deletion failed | category=%s", category)
+        raise HTTPException(status_code=502, detail=f"删除失败，请检查 Qdrant：{exc}") from exc
+    return {"status": "deleted", **result}
 
 
 # 注册流式问答接口，供图形界面实时显示每个处理阶段。

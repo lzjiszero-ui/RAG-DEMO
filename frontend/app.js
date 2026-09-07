@@ -80,7 +80,8 @@ const knowledgeFiles = document.querySelector("#knowledge-files");
 const selectedFiles = document.querySelector("#selected-files");
 const knowledgeUrl = document.querySelector("#knowledge-url");
 const importCategory = document.querySelector("#import-category");
-const categoryOptions = document.querySelector("#category-options");
+// 选择“新建分类”后显示的名称输入框。
+const newImportCategory = document.querySelector("#new-import-category");
 const importResult = document.querySelector("#import-result");
 
 // 读取浏览器保存的会话 ID；第一次访问时创建新的 UUID。
@@ -181,11 +182,16 @@ async function loadCategories() {
     option.textContent = category;
     categorySelect.appendChild(option);
   });
-  // 同步填充知识导入页的分类建议，但仍允许输入新分类。
-  categoryOptions.innerHTML = payload.categories
+  // 重建真正的分类下拉框，并在末尾保留新建分类入口。
+  const previousImportCategory = importCategory.value;
+  importCategory.innerHTML = payload.categories
     .filter((category) => category !== "全部")
-    .map((category) => `<option value="${escapeHtml(category)}"></option>`)
-    .join("");
+    .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`)
+    .join("") + '<option value="__new__">＋ 新建分类</option>';
+  // 刷新列表时尽量保留用户原来的选择。
+  importCategory.value = [...importCategory.options].some((option) => option.value === previousImportCategory)
+    ? previousImportCategory
+    : "通用";
   // 只有保存的分类仍存在时才恢复，否则使用“全部”。
   categorySelect.value = payload.categories.includes(savedCategory) ? savedCategory : "全部";
 }
@@ -310,6 +316,11 @@ function showImportSuccess(items) {
 function showImportError(error) {
   importResult.className = "import-result is-error";
   importResult.innerHTML = `<span class="empty-index">!</span><div><h2>导入失败</h2><p>${escapeHtml(error.message)}</p></div>`;
+}
+
+// 返回当前要写入的分类：已有分类取下拉值，新分类取输入框内容。
+function selectedImportCategory() {
+  return importCategory.value === "__new__" ? newImportCategory.value.trim() : importCategory.value;
 }
 
 // 把 0 到 1 的指标转换成一位小数百分比。
@@ -570,11 +581,22 @@ knowledgeFiles.addEventListener("change", () => {
   selectedFiles.textContent = names.length ? names.join("、") : "尚未选择文件";
 });
 
+// 选择新建分类时显示文字输入框，切回已有分类时将其隐藏。
+importCategory.addEventListener("change", () => {
+  const creating = importCategory.value === "__new__";
+  newImportCategory.hidden = !creating;
+  if (creating) newImportCategory.focus();
+});
+
 // 提交本地文件，以 multipart/form-data 保留原始二进制 PDF 内容。
 fileImportForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const category = importCategory.value.trim();
-  if (!category || knowledgeFiles.files.length === 0) return;
+  const category = selectedImportCategory();
+  if (!category) {
+    showImportError(new Error("请输入新分类名称"));
+    return;
+  }
+  if (knowledgeFiles.files.length === 0) return;
   const button = document.querySelector("#upload-files");
   button.disabled = true;
   showImportLoading(`正在解析 ${knowledgeFiles.files.length} 个文件并写入向量数据库；开启 Contextual Retrieval 时可能需要几分钟。`);
@@ -599,9 +621,13 @@ fileImportForm.addEventListener("submit", async (event) => {
 // 提交公开网页 URL，由后端抓取、清洗并执行统一入库流程。
 urlImportForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const category = importCategory.value.trim();
+  const category = selectedImportCategory();
   const url = knowledgeUrl.value.trim();
-  if (!category || !url) return;
+  if (!category) {
+    showImportError(new Error("请输入新分类名称"));
+    return;
+  }
+  if (!url) return;
   const button = document.querySelector("#import-url");
   button.disabled = true;
   showImportLoading("正在抓取网页、提取可见正文并写入向量数据库。");

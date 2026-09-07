@@ -120,8 +120,14 @@
             <h2>把文件和网页，<br />变成可检索的知识。</h2>
             <p>内容会经过文本解析、切片、Contextual Retrieval、Dense 与 BM25 向量化，然后增量写入 Qdrant。</p>
           </div>
-          <label class="import-category">知识分类<input id="import-category" maxlength="100" value="通用" list="category-options" placeholder="例如：产品手册" /></label>
-          <datalist id="category-options"></datalist>
+          <div class="import-category">
+            <label for="import-category">知识分类</label>
+            <select id="import-category" aria-label="选择导入分类">
+              <option value="通用">通用</option>
+              <option value="__new__">＋ 新建分类</option>
+            </select>
+            <input id="new-import-category" maxlength="100" placeholder="输入新分类名称" hidden />
+          </div>
         </div>
         <div class="import-grid">
           <form class="import-card" id="file-import-form">

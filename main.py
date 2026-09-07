@@ -66,7 +66,7 @@ class WebImportRequest(BaseModel):
     # 只接受长度合理的完整网页地址，具体协议和公网校验在服务层执行。
     url: str = Field(min_length=8, max_length=2048)
     # 网页写入该分类，之后可通过 Qdrant Metadata Filter 单独检索。
-    category: str = Field(default="通用", min_length=1, max_length=100)
+    category: str = Field(default="通用", max_length=100)
 
 # 把一个进度事件转换成一行 JSON，前端可以边接收边解析。
 def stream_line(payload: dict) -> str:
@@ -206,7 +206,7 @@ def health() -> dict[str, str]:
 @app.post("/knowledge/files")
 def import_files_endpoint(
     files: list[UploadFile] = File(...),
-    category: str = Form(default="通用", min_length=1, max_length=100),
+    category: str = Form(default="通用", max_length=100),
 ) -> dict:
     """上传 TXT、PDF、HTML 文件并增量写入 Qdrant。"""
     # 防止空文件数组以及一次请求上传过多文件。

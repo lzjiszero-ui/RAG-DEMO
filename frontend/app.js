@@ -87,6 +87,8 @@ const createCategoryButton = document.querySelector("#create-category");
 const cancelNewCategoryButton = document.querySelector("#cancel-new-category");
 const deleteCategoryButton = document.querySelector("#delete-category");
 const newCategoryRow = document.querySelector("#new-category-row");
+// 获取已有分类下拉框与操作按钮所在整行，用于新建时整体隐藏。
+const categoryRow = document.querySelector("#category-row");
 const importResult = document.querySelector("#import-result");
 
 // 读取浏览器保存的会话 ID；第一次访问时创建新的 UUID。
@@ -329,7 +331,8 @@ function showImportError(error) {
 
 // 返回当前要写入的分类：已有分类取下拉值，新分类取输入框内容。
 function selectedImportCategory() {
-  return creatingImportCategory ? newImportCategory.value.trim() : importCategory.value;
+  // 新分类没有填写名称时自动回退到“通用”。
+  return creatingImportCategory ? (newImportCategory.value.trim() || "通用") : importCategory.value;
 }
 
 // 把 0 到 1 的指标转换成一位小数百分比。
@@ -599,9 +602,8 @@ importCategory.addEventListener("change", () => {
 createCategoryButton.addEventListener("click", () => {
   creatingImportCategory = true;
   newCategoryRow.hidden = false;
-  importCategory.disabled = true;
-  createCategoryButton.disabled = true;
-  deleteCategoryButton.disabled = true;
+  // 隐藏原下拉框、新建和删除按钮，只显示新分类输入与取消。
+  categoryRow.hidden = true;
   newImportCategory.focus();
 });
 
@@ -610,8 +612,7 @@ cancelNewCategoryButton.addEventListener("click", () => {
   creatingImportCategory = false;
   newCategoryRow.hidden = true;
   newImportCategory.value = "";
-  importCategory.disabled = false;
-  createCategoryButton.disabled = false;
+  categoryRow.hidden = false;
   deleteCategoryButton.disabled = importCategory.value === "通用";
 });
 
@@ -639,10 +640,6 @@ deleteCategoryButton.addEventListener("click", async () => {
 fileImportForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const category = selectedImportCategory();
-  if (!category) {
-    showImportError(new Error("请输入新分类名称"));
-    return;
-  }
   if (knowledgeFiles.files.length === 0) return;
   const button = document.querySelector("#upload-files");
   button.disabled = true;
@@ -660,8 +657,7 @@ fileImportForm.addEventListener("submit", async (event) => {
     creatingImportCategory = false;
     newCategoryRow.hidden = true;
     newImportCategory.value = "";
-    importCategory.disabled = false;
-    createCategoryButton.disabled = false;
+    categoryRow.hidden = false;
     await loadCategories();
   } catch (error) {
     showImportError(error);
@@ -675,10 +671,6 @@ urlImportForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const category = selectedImportCategory();
   const url = knowledgeUrl.value.trim();
-  if (!category) {
-    showImportError(new Error("请输入新分类名称"));
-    return;
-  }
   if (!url) return;
   const button = document.querySelector("#import-url");
   button.disabled = true;
@@ -696,8 +688,7 @@ urlImportForm.addEventListener("submit", async (event) => {
     creatingImportCategory = false;
     newCategoryRow.hidden = true;
     newImportCategory.value = "";
-    importCategory.disabled = false;
-    createCategoryButton.disabled = false;
+    categoryRow.hidden = false;
     await loadCategories();
   } catch (error) {
     showImportError(error);

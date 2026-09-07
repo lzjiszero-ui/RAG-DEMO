@@ -26,7 +26,7 @@ button { color: inherit; }
 .ambient-two { background: #496cff; right: -20rem; bottom: -20rem; }
 .shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding-bottom: 72px; position: relative; }
 /* 顶栏、品牌和服务状态。 */
-.topbar { height: 86px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+.topbar { height: 70px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; }
 .brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; background: var(--accent); color: #111; font-weight: 900; }
 .brand strong, .brand small { display: block; }
@@ -37,12 +37,12 @@ button { color: inherit; }
 .service-status.is-online .status-dot { background: var(--accent); }
 .service-status.is-error .status-dot { background: #ff6c6c; }
 
-.hero { padding: 74px 0 48px; max-width: 850px; }
+.hero { padding: 38px 0 30px; max-width: 760px; }
 /* 首屏标题和功能标签。 */
 .eyebrow { margin: 0 0 18px; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .22em; }
-h1 { margin: 0; font-size: clamp(42px, 7vw, 82px); line-height: .98; letter-spacing: -.055em; font-weight: 720; }
+h1 { margin: 0; font-size: clamp(36px, 5vw, 60px); line-height: 1; letter-spacing: -.045em; font-weight: 720; }
 h1 span { color: var(--muted); }
-.hero-copy { max-width: 620px; margin: 26px 0 0; color: #a9b0b8; font-size: 16px; line-height: 1.75; }
+.hero-copy { max-width: 680px; margin: 18px 0 0; color: #a9b0b8; font-size: 15px; line-height: 1.65; }
 .tabs { display: flex; gap: 4px; margin-bottom: 14px; }
 .tab { padding: 10px 16px; border: 0; background: transparent; color: var(--muted); border-radius: 9px; cursor: pointer; }
 .tab.is-active { background: rgba(255,255,255,.07); color: var(--text); }

@@ -7,6 +7,17 @@ def test_safe_name_removes_path_separators() -> None:
     assert knowledge_service.safe_name("../危险/分类", "通用") == "_危险_分类"
 
 
+def test_empty_category_uses_general_folder(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(knowledge_service, "KNOWLEDGE_DIR", tmp_path)
+
+    destination, source, category = knowledge_service.source_location("", "guide.txt")
+
+    assert category == "通用"
+    assert source == "通用/guide.txt"
+    assert destination.parent == tmp_path / "通用"
+    assert destination.parent.is_dir()
+
+
 def test_validate_public_url_rejects_localhost(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_service.socket, "getaddrinfo", lambda *args, **kwargs: [(None, None, None, None, ("127.0.0.1", 80))])
 

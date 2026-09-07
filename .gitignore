@@ -6,3 +6,5 @@ __pycache__/
 .models/
 .cache/
 *.pyc
+# 知识文件可能包含用户上传内容或网页数据，只保留在部署机器本地。
+knowledge/

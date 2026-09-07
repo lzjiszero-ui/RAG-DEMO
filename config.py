@@ -52,3 +52,8 @@ RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
 # 读取相邻文本切片期望保留的重叠字符数。
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "80"))
+
+# 限制前台单个上传文件的体积，避免一次请求占用过多内存。
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "15"))
+# 限制网页抓取响应体积，防止异常页面耗尽服务内存。
+MAX_WEB_PAGE_MB = int(os.getenv("MAX_WEB_PAGE_MB", "5"))

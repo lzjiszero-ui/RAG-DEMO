@@ -47,10 +47,14 @@ const agentSelectedCategory = document.querySelector("#agent-selected-category")
 const serviceStatus = document.querySelector("#service-status");
 // 获取“知识问答”标签按钮。
 const qaTab = document.querySelector("#qa-tab");
+// 获取“知识导入”标签按钮。
+const importTab = document.querySelector("#import-tab");
 // 获取“检索评估”标签按钮。
 const evalTab = document.querySelector("#eval-tab");
 // 获取完整问答页面区域。
 const qaView = document.querySelector("#qa-view");
+// 获取文件与网页知识导入页面。
+const importView = document.querySelector("#import-view");
 // 获取完整评估页面区域。
 const evalView = document.querySelector("#eval-view");
 // 获取运行评估按钮。
@@ -69,6 +73,15 @@ const generationMetrics = document.querySelector("#generation-metrics");
 const bm25Impact = document.querySelector("#bm25-impact");
 // 获取逐题评估表格的 tbody。
 const caseList = document.querySelector("#case-list");
+// 获取知识导入页中的表单、输入和结果元素。
+const fileImportForm = document.querySelector("#file-import-form");
+const urlImportForm = document.querySelector("#url-import-form");
+const knowledgeFiles = document.querySelector("#knowledge-files");
+const selectedFiles = document.querySelector("#selected-files");
+const knowledgeUrl = document.querySelector("#knowledge-url");
+const importCategory = document.querySelector("#import-category");
+const categoryOptions = document.querySelector("#category-options");
+const importResult = document.querySelector("#import-result");
 
 // 读取浏览器保存的会话 ID；第一次访问时创建新的 UUID。
 let sessionId = localStorage.getItem("rag_session_id") || crypto.randomUUID();
@@ -168,6 +181,11 @@ async function loadCategories() {
     option.textContent = category;
     categorySelect.appendChild(option);
   });
+  // 同步填充知识导入页的分类建议，但仍允许输入新分类。
+  categoryOptions.innerHTML = payload.categories
+    .filter((category) => category !== "全部")
+    .map((category) => `<option value="${escapeHtml(category)}"></option>`)
+    .join("");
   // 只有保存的分类仍存在时才恢复，否则使用“全部”。
   categorySelect.value = payload.categories.includes(savedCategory) ? savedCategory : "全部";
 }
@@ -248,7 +266,7 @@ function renderSources(sources, retrievalMode = "unknown") {
     <article class="source-card">
       <!-- 显示来源、片段编号和两个检索分数。 -->
       <div class="source-meta">
-        <span class="source-name">[Reference ${index + 1}] ${escapeHtml(source.category)} · ${escapeHtml(source.point_name)} · ${escapeHtml(source.source)}</span>
+        <span class="source-name">[Reference ${index + 1}] ${escapeHtml(source.category)} · ${escapeHtml(source.point_name)} · ${source.url ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.source)}</a>` : escapeHtml(source.source)}</span>
         <span class="source-scores">${source.vector_score.toFixed(4)}${retrievalMode.includes("hybrid_rerank") ? ` / ${source.rerank_score.toFixed(4)}` : ""}</span>
       </div>
       <!-- 显示经过 HTML 转义的知识片段正文。 -->
@@ -259,16 +277,39 @@ function renderSources(sources, retrievalMode = "unknown") {
 
 // 在知识问答和检索评估两个主页面之间切换。
 function selectTab(tab) {
-  // 判断当前目标是否为评估页。
+  // 判断当前目标页面。
   const evaluationSelected = tab === "evaluation";
-  // 评估页未选中时，高亮知识问答标签。
-  qaTab.classList.toggle("is-active", !evaluationSelected);
+  const importSelected = tab === "import";
+  // 只高亮当前标签。
+  qaTab.classList.toggle("is-active", !evaluationSelected && !importSelected);
+  importTab.classList.toggle("is-active", importSelected);
   // 评估页选中时，高亮检索评估标签。
   evalTab.classList.toggle("is-active", evaluationSelected);
   // 选中评估页时隐藏整个知识问答区域。
-  qaView.hidden = evaluationSelected;
+  qaView.hidden = evaluationSelected || importSelected;
+  // 仅选择知识导入时显示导入页面。
+  importView.hidden = !importSelected;
   // 未选中评估页时隐藏整个评估区域。
   evalView.hidden = !evaluationSelected;
+}
+
+// 将知识导入区域切换成执行中状态。
+function showImportLoading(message) {
+  importResult.className = "import-result is-loading";
+  importResult.innerHTML = `<span class="loader"></span><div><h2>正在处理</h2><p>${escapeHtml(message)}</p></div>`;
+}
+
+// 显示一次文件或网页导入的成功摘要。
+function showImportSuccess(items) {
+  const totalChunks = items.reduce((sum, item) => sum + item.chunks, 0);
+  importResult.className = "import-result is-success";
+  importResult.innerHTML = `<span class="import-check">✓</span><div><h2>导入完成 · ${totalChunks} 个切片</h2><div class="import-items">${items.map((item) => `<p><b>${escapeHtml(item.source)}</b><span>${item.characters} 字符 · ${item.chunks} 切片</span></p>`).join("")}</div></div>`;
+}
+
+// 显示后端返回的安全错误信息。
+function showImportError(error) {
+  importResult.className = "import-result is-error";
+  importResult.innerHTML = `<span class="empty-index">!</span><div><h2>导入失败</h2><p>${escapeHtml(error.message)}</p></div>`;
 }
 
 // 把 0 到 1 的指标转换成一位小数百分比。
@@ -518,8 +559,69 @@ document.querySelectorAll("[data-question]").forEach((button) => {
 
 // 点击知识问答标签时显示问答页并隐藏评估页。
 qaTab.addEventListener("click", () => selectTab("qa"));
+// 点击知识导入标签时显示文件和网页入口。
+importTab.addEventListener("click", () => selectTab("import"));
 // 点击检索评估标签时显示评估页并隐藏问答页。
 evalTab.addEventListener("click", () => selectTab("evaluation"));
+
+// 选择文件后立即显示文件名，帮助用户确认导入范围。
+knowledgeFiles.addEventListener("change", () => {
+  const names = [...knowledgeFiles.files].map((file) => file.name);
+  selectedFiles.textContent = names.length ? names.join("、") : "尚未选择文件";
+});
+
+// 提交本地文件，以 multipart/form-data 保留原始二进制 PDF 内容。
+fileImportForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const category = importCategory.value.trim();
+  if (!category || knowledgeFiles.files.length === 0) return;
+  const button = document.querySelector("#upload-files");
+  button.disabled = true;
+  showImportLoading(`正在解析 ${knowledgeFiles.files.length} 个文件并写入向量数据库；开启 Contextual Retrieval 时可能需要几分钟。`);
+  try {
+    const formData = new FormData();
+    formData.append("category", category);
+    [...knowledgeFiles.files].forEach((file) => formData.append("files", file));
+    const response = await fetch("/knowledge/files", { method: "POST", body: formData });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "文件导入失败");
+    showImportSuccess(payload.items);
+    knowledgeFiles.value = "";
+    selectedFiles.textContent = "尚未选择文件";
+    await loadCategories();
+  } catch (error) {
+    showImportError(error);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+// 提交公开网页 URL，由后端抓取、清洗并执行统一入库流程。
+urlImportForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const category = importCategory.value.trim();
+  const url = knowledgeUrl.value.trim();
+  if (!category || !url) return;
+  const button = document.querySelector("#import-url");
+  button.disabled = true;
+  showImportLoading("正在抓取网页、提取可见正文并写入向量数据库。");
+  try {
+    const response = await fetch("/knowledge/url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, category }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "网页导入失败");
+    showImportSuccess([payload.item]);
+    knowledgeUrl.value = "";
+    await loadCategories();
+  } catch (error) {
+    showImportError(error);
+  } finally {
+    button.disabled = false;
+  }
+});
 // 监听运行评估按钮点击事件。
 runEvaluationButton.addEventListener("click", async () => {
   // 评估期间禁用按钮，避免重复并行运行模型。

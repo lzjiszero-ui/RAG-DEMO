@@ -3,7 +3,8 @@
 这是一个使用 LangChain 组件实现核心流程的 RAG 示例：
 
 ```text
-knowledge/*.txt 与 knowledge/分类名/*.txt（多个文件）
+knowledge 中的 TXT / PDF / HTML（多个文件或网页抓取结果）
+  → 按格式提取纯文本并清理 HTML 非正文节点
   → RecursiveCharacterTextSplitter 分块
   → OllamaEmbeddings（bge-m3）生成 Dense Embedding
   → FastEmbed BM25 生成 Sparse Embedding
@@ -46,7 +47,7 @@ uv sync
 uv run python ingest.py
 ```
 
-把 `.txt` 文件放入 `knowledge/` 目录，然后执行导入。这一步会重建 Qdrant 中的 `simple_rag_docs` Collection，但不会影响其他项目的 Collection。根目录文件归为“通用”，一级子目录名会成为分类，例如：
+把 `.txt`、`.pdf`、`.html` 或 `.htm` 文件放入 `knowledge/` 目录，然后执行导入。这一步会重建 Qdrant 中的 `simple_rag_docs` Collection，但不会影响其他项目的 Collection。PDF 必须包含文本层，扫描图片型 PDF 需要先 OCR。根目录文件归为“通用”，一级子目录名会成为分类，例如：
 
 ```text
 knowledge/
@@ -72,7 +73,16 @@ TOP_K=3
 RERANKER_MODEL=BAAI/bge-reranker-base
 LOG_LEVEL=INFO
 QUERY_REWRITE_REASONING=true
+MAX_UPLOAD_MB=15
+MAX_WEB_PAGE_MB=5
 ```
+
+图形界面的“知识导入”页提供两种增量入口：
+
+- 上传 TXT、PDF、HTML/HTM 文件，每次最多 10 个。
+- 输入公开 HTTP(S) 网页 URL，自动抓取并清理脚本、样式后提取可见正文。
+
+前台导入不会重建整个 Collection。它只删除 `metadata.source` 相同的旧 Point，再写入该来源的新切片，因此其他分类和文件会保留。上传原文件也会保存至 `knowledge/分类名/`，以后执行 `ingest.py` 全量重建时仍然存在。网页抓取会拒绝本机、内网和非 HTML 地址，并分别受 `MAX_WEB_PAGE_MB` 与 `MAX_UPLOAD_MB` 限制。部分依赖 JavaScript 动态渲染或禁止爬取的网站可能无法提取完整正文。
 
 `RETRIEVAL_MODE` 决定在线问答使用的检索管线：
 

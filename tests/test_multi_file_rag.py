@@ -3,7 +3,7 @@ from pathlib import Path
 from langchain_core.documents import Document
 
 import rag
-from ingest import load_documents
+from ingest import extract_text, load_documents
 
 
 def test_load_documents_keeps_source_and_chunk_index(tmp_path: Path) -> None:
@@ -19,6 +19,25 @@ def test_load_documents_keeps_source_and_chunk_index(tmp_path: Path) -> None:
         {"source": "first.txt", "category": "通用", "point_name": "first-1", "chunk_index": 0, "contextual_summary": "", "original_text": "first knowledge", "contextualized": False},
         {"source": "nested/second.txt", "category": "nested", "point_name": "second-1", "chunk_index": 0, "contextual_summary": "", "original_text": "second knowledge", "contextualized": False},
     ]
+
+
+def test_extract_html_keeps_visible_text_and_removes_script() -> None:
+    content = b"<html><head><style>.x{}</style></head><body><h1>Guide</h1><p>Useful text</p><script>alert(1)</script></body></html>"
+
+    text = extract_text(content, ".html")
+
+    assert "Guide" in text
+    assert "Useful text" in text
+    assert "alert" not in text
+
+
+def test_load_documents_supports_html(tmp_path: Path) -> None:
+    (tmp_path / "guide.html").write_text("<h1>HTML knowledge</h1><p>Imported body</p>", encoding="utf-8")
+
+    documents = load_documents(tmp_path, contextual_retrieval=False)
+
+    assert documents[0].metadata["source"] == "guide.html"
+    assert "HTML knowledge" in documents[0].page_content
 
 
 def test_load_documents_adds_contextual_retrieval_text(tmp_path: Path, monkeypatch) -> None:

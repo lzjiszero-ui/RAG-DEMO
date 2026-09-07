@@ -12,6 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 # 导入高精度计时器，用于统计各阶段耗时。
 from time import perf_counter
+from uuid import NAMESPACE_URL, uuid5
 
 # 导入 FastEmbed Cross-Encoder，用于对 Qdrant 候选结果重新评分。
 from fastembed.rerank.cross_encoder import TextCrossEncoder
@@ -30,7 +31,7 @@ from langchain_qdrant.sparse_embeddings import SparseEmbeddings, SparseVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 # 导入 Qdrant Filter 数据结构，用 metadata.category 限制召回范围。
 from qdrant_client import QdrantClient
-from qdrant_client.models import FieldCondition, Filter, MatchValue
+from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
 
 # 从配置模块导入模型、服务、分块和检索相关参数。
 from config import (
@@ -175,6 +176,39 @@ def rebuild_index(documents: list[Document]) -> int:
     return len(documents)
 
 
+def upsert_source_documents(documents: list[Document]) -> int:
+    """覆盖一个来源的旧切片，并把新切片增量写入现有 Collection。"""
+    # 所有切片都由 build_documents 生成，因此可以用第一片取得来源。
+    if not documents:
+        raise ValueError("no documents to index")
+    source = str(documents[0].metadata["source"])
+    # 创建轻量客户端，用于检查 Collection 和删除旧来源。
+    client = QdrantClient(url=QDRANT_URL)
+    # 第一次从页面导入时，直接创建支持 Dense + Sparse 的 Collection。
+    if not client.collection_exists(COLLECTION_NAME):
+        QdrantVectorStore.from_documents(
+            documents=documents,
+            embedding=embeddings(),
+            sparse_embedding=sparse_embeddings(),
+            retrieval_mode=RetrievalMode.HYBRID,
+            url=QDRANT_URL,
+            collection_name=COLLECTION_NAME,
+        )
+        return len(documents)
+    # 删除同一 source 的全部旧 Point，避免文件缩短后残留多余切片。
+    client.delete(
+        collection_name=COLLECTION_NAME,
+        points_selector=FilterSelector(filter=Filter(must=[FieldCondition(key="metadata.source", match=MatchValue(value=source))])),
+        wait=True,
+    )
+    # 使用稳定 UUID 作为 Point ID；同一来源和切片序号始终映射到同一 ID。
+    ids = [str(uuid5(NAMESPACE_URL, f"{COLLECTION_NAME}:{source}:{document.metadata['chunk_index']}")) for document in documents]
+    # 连接已有 Hybrid Collection，并同时生成 Dense 与 BM25 Sparse 向量。
+    vector_store().add_documents(documents=documents, ids=ids)
+    logger.info("source index updated | source=%s | chunks=%d", source, len(documents))
+    return len(documents)
+
+
 # 使用 dataclass 自动生成初始化方法和字段表示。
 @dataclass
 # 定义应用层检索结果，避免把 Qdrant SDK 原始对象暴露给 API。
@@ -193,6 +227,8 @@ class SearchHit:
     category: str = "通用"
     # 方便页面和 Dashboard 识别的 Point 名称。
     point_name: str = "unknown"
+    # 网页抓取来源的原始公开 URL；本地文件没有该字段。
+    url: str = ""
 
 
 # 创建一个连接现有 Qdrant Collection 的 LangChain VectorStore。
@@ -316,6 +352,7 @@ def candidates_to_hits(documents_with_scores: list[tuple[Document, float]], limi
             source=str(document.metadata.get("source", "unknown")),
             category=str(document.metadata.get("category", "通用")),
             point_name=str(document.metadata.get("point_name", "unknown")),
+            url=str(document.metadata.get("url", "")),
         )
         for document, score in documents_with_scores[:limit]
     ]
@@ -388,6 +425,7 @@ def rerank_candidates(
             category=str(document.metadata.get("category", "通用")),
             # 从 metadata 读取可读 Point 名称。
             point_name=str(document.metadata.get("point_name", "unknown")),
+            url=str(document.metadata.get("url", "")),
         )
         # 对排序结果做嵌套解包，获得 Document、两个分数。
         for (document, vector_score), rerank_score in ranked_results

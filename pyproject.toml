@@ -12,6 +12,8 @@ dependencies = [
   "langchain-qdrant>=1.1.0",
   "langchain-text-splitters>=1.1.2",
   "mcp>=1.13,<2",
+  "beautifulsoup4>=4.12,<5",
+  "pypdf>=5,<7",
   "python-dotenv==1.0.1",
   "qdrant-client==1.19.0",
   "uvicorn>=0.31.1,<1",

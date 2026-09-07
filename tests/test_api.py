@@ -97,6 +97,32 @@ def test_categories_endpoint_lists_knowledge_folders() -> None:
     assert {"全部", "三国演义", "水浒传", "西游记"}.issubset(response.json()["categories"])
 
 
+def test_file_import_endpoint(monkeypatch) -> None:
+    monkeypatch.setattr(main, "import_bytes", lambda content, filename, category: {
+        "source": f"{category}/{filename}", "category": category, "characters": len(content), "chunks": 2
+    })
+
+    response = client.post(
+        "/knowledge/files",
+        data={"category": "测试资料"},
+        files={"files": ("guide.txt", b"knowledge", "text/plain")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["chunk_count"] == 2
+
+
+def test_url_import_endpoint(monkeypatch) -> None:
+    monkeypatch.setattr(main, "import_url", lambda url, category: {
+        "source": "网页/example.html", "category": category, "characters": 100, "chunks": 1, "url": url
+    })
+
+    response = client.post("/knowledge/url", json={"url": "https://example.com/article", "category": "网页"})
+
+    assert response.status_code == 200
+    assert response.json()["item"]["url"] == "https://example.com/article"
+
+
 def test_chat_history_is_isolated_by_category(monkeypatch) -> None:
     candidate = (Document(page_content="context", metadata={"source": "book.txt", "category": "水浒传", "point_name": "水浒传-1", "chunk_index": 0}), 0.8)
     hit = SearchHit(text="context", vector_score=0.8, rerank_score=0.9, chunk_index=0, source="book.txt", category="水浒传", point_name="水浒传-1")

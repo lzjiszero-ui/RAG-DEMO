@@ -41,6 +41,7 @@
       <!-- 两个标签用于切换问答页和评估页。 -->
       <nav class="tabs" aria-label="功能导航">
         <button class="tab is-active" id="qa-tab" type="button">知识问答</button>
+        <button class="tab" id="import-tab" type="button">知识导入</button>
         <button class="tab" id="eval-tab" type="button">检索评估</button>
       </nav>
 
@@ -108,6 +109,42 @@
             <div class="sources-heading"><h3>检索依据</h3><span id="retrieval-mode-label">RETRIEVAL SCORE</span></div>
             <div class="source-list" id="source-list"></div>
           </div>
+        </section>
+      </section>
+
+      <!-- 知识导入页支持本地文件上传和公开网页抓取。 -->
+      <section class="import-view" id="import-view" hidden>
+        <div class="import-heading">
+          <div>
+            <p class="eyebrow">KNOWLEDGE INGESTION</p>
+            <h2>把文件和网页，<br />变成可检索的知识。</h2>
+            <p>内容会经过文本解析、切片、Contextual Retrieval、Dense 与 BM25 向量化，然后增量写入 Qdrant。</p>
+          </div>
+          <label class="import-category">知识分类<input id="import-category" maxlength="100" value="通用" list="category-options" placeholder="例如：产品手册" /></label>
+          <datalist id="category-options"></datalist>
+        </div>
+        <div class="import-grid">
+          <form class="import-card" id="file-import-form">
+            <span class="import-index">01 · FILES</span>
+            <h3>上传本地文件</h3>
+            <p>支持 TXT、PDF、HTML/HTM，一次最多选择 10 个。扫描版 PDF 需要先进行 OCR。</p>
+            <label class="file-drop" for="knowledge-files">
+              <input id="knowledge-files" type="file" accept=".txt,.pdf,.html,.htm,text/plain,application/pdf,text/html" multiple required />
+              <b>选择文件</b><span id="selected-files">尚未选择文件</span>
+            </label>
+            <button class="primary-button" id="upload-files" type="submit"><span>解析并写入</span><b>↑</b></button>
+          </form>
+          <form class="import-card" id="url-import-form">
+            <span class="import-index">02 · WEB PAGE</span>
+            <h3>抓取网页</h3>
+            <p>输入公开网页地址，系统会清理导航、脚本和样式后提取正文。动态渲染页面可能无法取得完整内容。</p>
+            <label class="url-field" for="knowledge-url">网页 URL<input id="knowledge-url" type="url" maxlength="2048" placeholder="https://example.com/article" required /></label>
+            <button class="primary-button" id="import-url" type="submit"><span>抓取并写入</span><b>↗</b></button>
+          </form>
+        </div>
+        <section class="import-result" id="import-result" aria-live="polite">
+          <span class="empty-index">03</span>
+          <div><h2>等待导入</h2><p>导入进度、文件来源、字符数和切片数会显示在这里。</p></div>
         </section>
       </section>
 

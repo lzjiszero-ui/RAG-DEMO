@@ -12,7 +12,7 @@ from time import perf_counter
 # 导入 httpx，用于健康检查时访问 Ollama 和 Qdrant。
 import httpx
 # 导入 FastAPI 应用类和 HTTP 异常类型。
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 # 导入 FileResponse，用于返回前端首页文件。
 from fastapi.responses import FileResponse, StreamingResponse
 # 导入 StaticFiles，用于提供 JavaScript 和 CSS 静态资源。
@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 # 导入两个本地服务的配置地址。
-from config import OLLAMA_URL, QDRANT_URL, QUERY_REWRITE_REASONING, RETRIEVAL_MODE
+from config import MAX_UPLOAD_MB, OLLAMA_URL, QDRANT_URL, QUERY_REWRITE_REASONING, RETRIEVAL_MODE
 # 导入内存会话的读取、保存、清除和 Prompt 格式化工具。
 from chat_memory import ChatTurn, append_turn, clear_history, format_history, get_history, serialize_history
 # 导入检索评估主函数。
@@ -32,6 +32,7 @@ from rag import candidates_to_hits, generate, rerank_candidates, retrieve_mode_c
 # 导入统一日志初始化函数。
 from logging_config import configure_logging
 from agent import run_agent
+from knowledge_service import import_bytes, import_url
 
 # 初始化项目日志格式和级别。
 configure_logging()
@@ -58,6 +59,14 @@ class ChatRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     # rag 走固定管线；agent 让 Qwen 自主决定是否以及如何调用工具。
     mode: Literal["rag", "agent"] = "rag"
+
+
+# 定义网页抓取导入的 JSON 请求结构。
+class WebImportRequest(BaseModel):
+    # 只接受长度合理的完整网页地址，具体协议和公网校验在服务层执行。
+    url: str = Field(min_length=8, max_length=2048)
+    # 网页写入该分类，之后可通过 Qdrant Metadata Filter 单独检索。
+    category: str = Field(default="通用", min_length=1, max_length=100)
 
 # 把一个进度事件转换成一行 JSON，前端可以边接收边解析。
 def stream_line(payload: dict) -> str:
@@ -193,6 +202,49 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# 注册多文件上传接口；multipart/form-data 同时携带文件和分类。
+@app.post("/knowledge/files")
+def import_files_endpoint(
+    files: list[UploadFile] = File(...),
+    category: str = Form(default="通用", min_length=1, max_length=100),
+) -> dict:
+    """上传 TXT、PDF、HTML 文件并增量写入 Qdrant。"""
+    # 防止空文件数组以及一次请求上传过多文件。
+    if not files or len(files) > 10:
+        raise HTTPException(status_code=400, detail="每次请选择 1 到 10 个文件")
+    results = []
+    try:
+        # 每个来源分别覆盖写入，因此一个请求可同时导入多个文件。
+        for upload in files:
+            filename = upload.filename or "document.txt"
+            # 只多读一个字节即可判断超限，避免先把任意大文件全部读进内存。
+            content = upload.file.read(MAX_UPLOAD_MB * 1024 * 1024 + 1)
+            results.append(import_bytes(content, filename, category))
+    except (ValueError, OSError) as exc:
+        logger.warning("file import rejected | reason=%s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("file import failed")
+        raise HTTPException(status_code=502, detail=f"导入失败，请检查 Ollama 与 Qdrant：{exc}") from exc
+    # 返回文件数、切片总数和逐文件明细。
+    return {"status": "completed", "file_count": len(results), "chunk_count": sum(item["chunks"] for item in results), "items": results}
+
+
+# 注册网页 URL 抓取接口。
+@app.post("/knowledge/url")
+def import_url_endpoint(request: WebImportRequest) -> dict:
+    """抓取一个公开 HTML 页面并增量写入 Qdrant。"""
+    try:
+        result = import_url(request.url, request.category)
+    except (ValueError, httpx.HTTPError, OSError) as exc:
+        logger.warning("web import rejected | url=%s | reason=%s", request.url, exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("web import failed | url=%s", request.url)
+        raise HTTPException(status_code=502, detail=f"导入失败，请检查 Ollama 与 Qdrant：{exc}") from exc
+    return {"status": "completed", "item": result}
+
+
 # 注册流式问答接口，供图形界面实时显示每个处理阶段。
 @app.post("/ask/stream")
 # 定义流式问答接口处理函数。
@@ -234,10 +286,12 @@ def clear_chat_endpoint(session_id: str, category: str = "全部") -> dict[str, 
 def categories_endpoint() -> dict[str, list[str]]:
     # 定位知识文件目录。
     knowledge_dir = Path(__file__).with_name("knowledge")
-    # 根目录 TXT 属于“通用”，一级子目录名作为其他分类。
-    categories = {"通用"} if any(knowledge_dir.glob("*.txt")) else set()
-    # 只添加实际包含 TXT 文件的一级子目录。
-    categories.update(path.name for path in knowledge_dir.iterdir() if path.is_dir() and any(path.rglob("*.txt")))
+    # TXT、PDF、HTML 任一种支持文件存在时，该目录就是有效分类。
+    supported = {".txt", ".pdf", ".html", ".htm"}
+    # 根目录文件属于“通用”。
+    categories = {"通用"} if any(path.is_file() and path.suffix.lower() in supported for path in knowledge_dir.iterdir()) else set()
+    # 只添加实际包含支持文件的一级子目录。
+    categories.update(path.name for path in knowledge_dir.iterdir() if path.is_dir() and any(item.is_file() and item.suffix.lower() in supported for item in path.rglob("*")))
     # “全部”固定排在第一项，其余分类按名称排序。
     return {"categories": ["全部", *sorted(categories)]}
 

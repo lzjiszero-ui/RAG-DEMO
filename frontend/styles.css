@@ -193,3 +193,36 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
   .impact-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .impact-title { grid-column: 1 / -1; }
 }
+/* 知识导入页沿用主界面的卡片语言，并给长 URL 和文件名留出换行空间。 */
+.import-view { display: grid; gap: 24px; }
+.import-heading { display: grid; grid-template-columns: 1fr minmax(220px, 320px); gap: 28px; align-items: end; padding: 30px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel); }
+.import-heading h2 { margin: 6px 0 12px; font-size: clamp(28px, 4vw, 48px); line-height: 1.08; }
+.import-heading p:last-child { max-width: 720px; color: var(--muted); line-height: 1.7; }
+.import-category, .url-field { display: grid; gap: 10px; color: var(--muted); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+.import-category input, .url-field input { width: 100%; padding: 15px 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.04); color: var(--text); outline: none; text-transform: none; letter-spacing: normal; }
+.import-category input:focus, .url-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.import-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.import-card { display: flex; min-height: 320px; flex-direction: column; gap: 16px; padding: 28px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel); }
+.import-card h3 { margin: 0; font-size: 24px; }
+.import-card > p { margin: 0; color: var(--muted); line-height: 1.65; }
+.import-card .primary-button { align-self: flex-start; margin-top: auto; }
+.import-index { color: var(--accent); font-size: 11px; letter-spacing: .16em; }
+.file-drop { display: grid; gap: 8px; padding: 24px; border: 1px dashed rgba(215,255,95,.38); border-radius: 14px; background: var(--accent-soft); cursor: pointer; }
+.file-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.file-drop b { color: var(--accent); }
+.file-drop span { overflow-wrap: anywhere; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.import-result { display: flex; min-height: 130px; align-items: center; gap: 20px; padding: 28px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel); }
+.import-result h2, .import-result p { margin: 0; }
+.import-result p { margin-top: 6px; color: var(--muted); }
+.import-result.is-success { border-color: rgba(215,255,95,.38); }
+.import-result.is-error { border-color: rgba(255,100,100,.4); }
+.import-check { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 50%; background: var(--accent); color: #10130a; font-size: 22px; font-weight: 800; }
+.import-items { display: grid; gap: 9px; margin-top: 14px; }
+.import-items p { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.import-items b { overflow-wrap: anywhere; color: var(--text); }
+.import-items span { color: var(--muted); }
+
+@media (max-width: 760px) {
+  .import-heading, .import-grid { grid-template-columns: 1fr; }
+  .import-card { min-height: 0; }
+}

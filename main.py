@@ -32,7 +32,9 @@ from rag import candidates_to_hits, generate, rerank_candidates, retrieve_mode_c
 # 导入统一日志初始化函数。
 from logging_config import configure_logging
 from agent import run_agent
-from knowledge_service import delete_category, import_bytes, import_url
+from knowledge_service import delete_category
+# 导入后台任务创建、状态读取和手动重试入口。
+from import_jobs import get_job, retry_job, submit_file_job, submit_url_job
 
 # 初始化项目日志格式和级别。
 configure_logging()
@@ -203,7 +205,7 @@ def health() -> dict[str, str]:
 
 
 # 注册多文件上传接口；multipart/form-data 同时携带文件和分类。
-@app.post("/knowledge/files")
+@app.post("/knowledge/files", status_code=202)
 def import_files_endpoint(
     files: list[UploadFile] = File(...),
     category: str = Form(default="通用", max_length=100),
@@ -212,37 +214,51 @@ def import_files_endpoint(
     # 防止空文件数组以及一次请求上传过多文件。
     if not files or len(files) > 10:
         raise HTTPException(status_code=400, detail="每次请选择 1 到 10 个文件")
-    results = []
     try:
-        # 每个来源分别覆盖写入，因此一个请求可同时导入多个文件。
+        # 请求阶段只读取受限大小的字节，耗时解析和模型调用交给后台线程。
+        queued_files = []
         for upload in files:
             filename = upload.filename or "document.txt"
             # 只多读一个字节即可判断超限，避免先把任意大文件全部读进内存。
             content = upload.file.read(MAX_UPLOAD_MB * 1024 * 1024 + 1)
-            results.append(import_bytes(content, filename, category))
+            if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
+                raise ValueError(f"{filename} 不能超过 {MAX_UPLOAD_MB} MB")
+            queued_files.append((filename, content))
+        # 立即返回 202 和任务 ID，页面随后轮询状态。
+        return submit_file_job(queued_files, category)
     except (ValueError, OSError) as exc:
-        logger.warning("file import rejected | reason=%s", exc)
+        logger.warning("file task rejected | reason=%s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("file import failed")
-        raise HTTPException(status_code=502, detail=f"导入失败，请检查 Ollama 与 Qdrant：{exc}") from exc
-    # 返回文件数、切片总数和逐文件明细。
-    return {"status": "completed", "file_count": len(results), "chunk_count": sum(item["chunks"] for item in results), "items": results}
 
 
 # 注册网页 URL 抓取接口。
-@app.post("/knowledge/url")
+@app.post("/knowledge/url", status_code=202)
 def import_url_endpoint(request: WebImportRequest) -> dict:
     """抓取一个公开 HTML 页面并增量写入 Qdrant。"""
+    # URL 的联网校验、下载和索引都在后台任务中执行。
+    return submit_url_job(request.url, request.category)
+
+
+# 页面定时读取这个接口，获得真实阶段、百分比和尝试次数。
+@app.get("/knowledge/jobs/{job_id}")
+def import_job_endpoint(job_id: str) -> dict:
+    """返回一个导入任务的当前状态。"""
     try:
-        result = import_url(request.url, request.category)
-    except (ValueError, httpx.HTTPError, OSError) as exc:
-        logger.warning("web import rejected | url=%s | reason=%s", request.url, exc)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("web import failed | url=%s", request.url)
-        raise HTTPException(status_code=502, detail=f"导入失败，请检查 Ollama 与 Qdrant：{exc}") from exc
-    return {"status": "completed", "item": result}
+        return get_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="导入任务不存在或已过期") from exc
+
+
+# 最终失败后由页面“重新尝试”按钮调用。
+@app.post("/knowledge/jobs/{job_id}/retry", status_code=202)
+def retry_import_job_endpoint(job_id: str) -> dict:
+    """手动重新提交一个失败任务。"""
+    try:
+        return retry_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="导入任务不存在或已过期") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 # 注册知识分类删除接口；前端确认后才会调用。

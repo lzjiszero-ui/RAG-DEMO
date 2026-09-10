@@ -3,6 +3,8 @@
 # 导入 Path，用于递归查找知识文件和处理相对路径。
 from pathlib import Path
 from io import BytesIO
+# 导入回调类型，用于把长文档逐切片进度通知给后台任务管理器。
+from collections.abc import Callable
 # 导入缓存装饰器，复用上下文生成 Chain 和模型连接。
 from functools import lru_cache
 # 导入日志模块，用于记录文件读取和索引进度。
@@ -100,6 +102,7 @@ def build_documents(
     category: str,
     point_stem: str,
     contextual_retrieval: bool = CONTEXTUAL_RETRIEVAL,
+    progress_callback: Callable[[str, int, str], None] | None = None,
 ) -> list[Document]:
     """把一份已解析文本转换成可写入 Qdrant 的 Document 切片。"""
     # 拒绝空文件以及没有文本层的扫描 PDF。
@@ -107,10 +110,16 @@ def build_documents(
         raise ValueError("文件中没有可提取的文本；扫描版 PDF 需要先进行 OCR")
     # 使用项目统一的切片大小和 overlap 配置。
     chunks = split_text(document_text)
+    # 切片完成后立即报告数量，页面无需等待全部上下文生成才有反馈。
+    if progress_callback:
+        progress_callback("chunking", 20, f"文本切分完成，共 {len(chunks)} 个切片")
     # 收集这一个来源生成的全部 LangChain Document。
     documents: list[Document] = []
     # 逐片生成可检索正文及来源元数据。
     for index, chunk in enumerate(chunks):
+        # Contextual Retrieval 较慢，因此在每个切片前报告真实序号。
+        if progress_callback and contextual_retrieval:
+            progress_callback("contextualizing", 20 + int(50 * index / max(1, len(chunks))), f"正在生成切片上下文 {index + 1}/{len(chunks)}")
         contextual_summary = contextualize_chunk(source, document_text, chunk) if contextual_retrieval else ""
         indexed_content = f"文档来源：{source}\n切片上下文：{contextual_summary}\n原始片段：{chunk}" if contextual_summary else chunk
         documents.append(Document(page_content=indexed_content, metadata={
@@ -122,6 +131,9 @@ def build_documents(
             "original_text": chunk,
             "contextualized": bool(contextual_summary),
         }))
+    # 无论是否开启 Contextual Retrieval，都明确表示文档构建阶段完成。
+    if progress_callback:
+        progress_callback("contextualizing" if contextual_retrieval else "chunking", 70, f"已准备 {len(documents)} 个待向量化切片")
     return documents
 
 

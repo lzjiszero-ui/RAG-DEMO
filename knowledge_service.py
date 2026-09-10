@@ -16,6 +16,8 @@ import re
 import shutil
 # 导入 URL 解析工具，校验协议、主机并生成来源名称。
 from urllib.parse import urljoin, urlparse
+# 导入回调类型，把导入阶段实时传递给异步任务。
+from collections.abc import Callable
 
 # 导入 HTTP 客户端，用于限制超时、重定向和流式读取网页。
 import httpx
@@ -33,6 +35,8 @@ from rag import upsert_source_documents
 logger = logging.getLogger(__name__)
 # 定位项目中的知识库根目录。
 KNOWLEDGE_DIR = Path(__file__).with_name("knowledge")
+# 统一定义进度回调签名：阶段、百分比、用户可见消息。
+ProgressCallback = Callable[[str, int, str], None]
 
 
 def safe_name(value: str, fallback: str) -> str:
@@ -57,7 +61,13 @@ def source_location(category: str, filename: str) -> tuple[Path, str, str]:
     return category_dir / safe_filename, source, safe_category
 
 
-def import_bytes(content: bytes, filename: str, category: str, original_url: str | None = None) -> dict:
+def import_bytes(
+    content: bytes,
+    filename: str,
+    category: str,
+    original_url: str | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> dict:
     """解析一个上传文件，保存原文，并覆盖写入该来源的向量切片。"""
     # 空文件没有可索引内容。
     if not content:
@@ -69,6 +79,9 @@ def import_bytes(content: bytes, filename: str, category: str, original_url: str
     extension = Path(filename).suffix.lower()
     if extension not in SUPPORTED_EXTENSIONS:
         raise ValueError("只支持 .txt、.pdf、.html、.htm 文件")
+    # 通知任务管理器开始解析文件格式。
+    if progress_callback:
+        progress_callback("parsing", 8, f"正在解析 {filename}")
     # 先解析并确认存在正文，失败文件不会写入 knowledge 目录。
     text = extract_text(content, extension)
     # 生成受控的保存位置及 metadata。
@@ -76,13 +89,17 @@ def import_bytes(content: bytes, filename: str, category: str, original_url: str
     # 保存原始文件，让下一次 ingest.py 全量重建时仍能包含前台上传内容。
     destination.write_bytes(content)
     # 使用文件 stem 作为 Qdrant Dashboard 中可读的 Point 名称前缀。
-    documents = build_documents(text, source, safe_category, destination.stem)
+    documents = build_documents(text, source, safe_category, destination.stem, progress_callback=progress_callback)
     # 网页来源额外写入原始 URL，使回答的引用可以追溯到真实页面。
     if original_url:
         for document in documents:
             document.metadata["url"] = original_url
     # 同一 source 覆盖，其他来源不受影响。
+    if progress_callback:
+        progress_callback("embedding", 75, "正在生成 Dense 与 BM25 Sparse 向量")
     count = upsert_source_documents(documents)
+    if progress_callback:
+        progress_callback("writing", 95, f"Qdrant 已写入 {count} 个切片")
     logger.info("uploaded knowledge imported | source=%s | chars=%d | chunks=%d", source, len(text), count)
     # 返回前台需要的结果摘要，不回传完整原文。
     return {"source": source, "category": safe_category, "characters": len(text), "chunks": count}
@@ -142,15 +159,23 @@ def fetch_web_page(url: str) -> tuple[bytes, str]:
     raise ValueError("网页重定向次数过多")
 
 
-def import_url(url: str, category: str) -> dict:
+def import_url(url: str, category: str, progress_callback: ProgressCallback | None = None) -> dict:
     """抓取网页、生成稳定 HTML 文件名并写入知识库。"""
     # 获取最终页面，重定向后的 URL 用作真实来源依据。
+    if progress_callback:
+        progress_callback("fetching", 5, "正在下载网页 HTML")
     content, final_url = fetch_web_page(url)
     # 从域名和 URL 哈希生成稳定文件名；重复导入同一页面会覆盖旧切片。
     parsed = urlparse(final_url)
     host = safe_name(parsed.hostname or "web", "web")
     digest = sha256(final_url.encode("utf-8")).hexdigest()[:12]
-    result = import_bytes(content, f"{host}-{digest}.html", category, original_url=final_url)
+    result = import_bytes(
+        content,
+        f"{host}-{digest}.html",
+        category,
+        original_url=final_url,
+        progress_callback=progress_callback,
+    )
     # 额外保存原始网页 URL，供页面明确展示抓取目标。
     result["url"] = final_url
     return result

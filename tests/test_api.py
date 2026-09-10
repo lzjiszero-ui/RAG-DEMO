@@ -98,8 +98,8 @@ def test_categories_endpoint_lists_knowledge_folders() -> None:
 
 
 def test_file_import_endpoint(monkeypatch) -> None:
-    monkeypatch.setattr(main, "import_bytes", lambda content, filename, category: {
-        "source": f"{category}/{filename}", "category": category, "characters": len(content), "chunks": 2
+    monkeypatch.setattr(main, "submit_file_job", lambda files, category: {
+        "id": "file-job", "kind": "files", "status": "queued", "category": category, "file_count": len(files)
     })
 
     response = client.post(
@@ -108,19 +108,33 @@ def test_file_import_endpoint(monkeypatch) -> None:
         files={"files": ("guide.txt", b"knowledge", "text/plain")},
     )
 
-    assert response.status_code == 200
-    assert response.json()["chunk_count"] == 2
+    assert response.status_code == 202
+    assert response.json()["id"] == "file-job"
+    assert response.json()["file_count"] == 1
 
 
 def test_url_import_endpoint(monkeypatch) -> None:
-    monkeypatch.setattr(main, "import_url", lambda url, category: {
-        "source": "网页/example.html", "category": category, "characters": 100, "chunks": 1, "url": url
+    monkeypatch.setattr(main, "submit_url_job", lambda url, category: {
+        "id": "url-job", "kind": "url", "status": "queued", "url": url, "category": category
     })
 
     response = client.post("/knowledge/url", json={"url": "https://example.com/article", "category": "网页"})
 
-    assert response.status_code == 200
-    assert response.json()["item"]["url"] == "https://example.com/article"
+    assert response.status_code == 202
+    assert response.json()["id"] == "url-job"
+    assert response.json()["url"] == "https://example.com/article"
+
+
+def test_import_job_status_and_retry_endpoints(monkeypatch) -> None:
+    monkeypatch.setattr(main, "get_job", lambda job_id: {"id": job_id, "status": "running", "progress": 45})
+    monkeypatch.setattr(main, "retry_job", lambda job_id: {"id": job_id, "status": "queued", "progress": 0})
+
+    status_response = client.get("/knowledge/jobs/demo-job")
+    retry_response = client.post("/knowledge/jobs/demo-job/retry")
+
+    assert status_response.json()["progress"] == 45
+    assert retry_response.status_code == 202
+    assert retry_response.json()["status"] == "queued"
 
 
 def test_delete_category_endpoint(monkeypatch) -> None:

@@ -57,3 +57,7 @@ CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "80"))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "15"))
 # 限制网页抓取响应体积，防止异常页面耗尽服务内存。
 MAX_WEB_PAGE_MB = int(os.getenv("MAX_WEB_PAGE_MB", "5"))
+# 后台导入任务发生服务异常时允许的总尝试次数，包含第一次执行。
+IMPORT_MAX_ATTEMPTS = max(1, int(os.getenv("IMPORT_MAX_ATTEMPTS", "3")))
+# 自动重试前等待的秒数，避免依赖服务短暂异常时立即连续失败。
+IMPORT_RETRY_DELAY_SECONDS = max(0.0, float(os.getenv("IMPORT_RETRY_DELAY_SECONDS", "2")))

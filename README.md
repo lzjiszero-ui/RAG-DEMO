@@ -83,6 +83,10 @@ MAX_WEB_PAGE_MB=5
 - 输入公开 HTTP(S) 网页 URL，自动抓取并清理脚本、样式后提取可见正文。
 - 分类下拉框右侧可以新建或删除分类；“通用”分类不可整类删除。
 
+文件和网页提交后，API 会立即返回 `202 Accepted` 与任务 ID，实际解析和索引由单线程后台队列处理。页面每约 700ms 查询一次任务状态，并实时显示网页抓取、解析、切片、Contextual Retrieval、Embedding、Qdrant 写入和完成百分比。依赖服务等临时异常会按照 `IMPORT_MAX_ATTEMPTS` 自动重试，每次间隔由 `IMPORT_RETRY_DELAY_SECONDS` 控制；达到上限后页面会显示“重新尝试”按钮。格式错误、空文件等输入问题不会进行无意义的自动重试。
+
+当前任务队列保存在 FastAPI 进程内存中，适合本地学习和单进程运行；刷新页面可以恢复仍存在的任务进度，但重启 FastAPI 会清空任务记录。生产环境应进一步替换为 Redis + Celery/RQ，并让多个 Web 进程共享状态。
+
 前台导入不会重建整个 Collection。它只删除 `metadata.source` 相同的旧 Point，再写入该来源的新切片，因此其他分类和文件会保留。上传原文件也会保存至 `knowledge/分类名/`，以后执行 `ingest.py` 全量重建时仍然存在。网页抓取会拒绝本机、内网和非 HTML 地址，并分别受 `MAX_WEB_PAGE_MB` 与 `MAX_UPLOAD_MB` 限制。部分依赖 JavaScript 动态渲染或禁止爬取的网站可能无法提取完整正文。
 
 删除分类会精确删除 Qdrant 中 `metadata.category` 等于该分类的 Point，同时删除 `knowledge/分类名/` 目录下的源文件，其他分类不受影响。页面会在执行这个不可恢复的操作前要求确认。

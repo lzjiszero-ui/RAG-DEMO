@@ -316,6 +316,75 @@ function showImportLoading(message) {
   importResult.innerHTML = `<span class="loader"></span><div><h2>正在处理</h2><p>${escapeHtml(message)}</p></div>`;
 }
 
+// 根据后台任务快照实时绘制阶段、进度条和尝试次数。
+function showImportProgress(job) {
+  const labels = {
+    queued: "等待执行",
+    starting: "启动任务",
+    fetching: "抓取网页",
+    parsing: "解析文档",
+    chunking: "切分文本",
+    contextualizing: "生成切片上下文",
+    embedding: "生成向量",
+    writing: "写入 Qdrant",
+    retrying: "准备重试",
+  };
+  importResult.className = `import-result is-loading job-${job.status}`;
+  importResult.innerHTML = `
+    <div class="job-progress-head"><span class="loader"></span><div><h2>${escapeHtml(labels[job.step] || "后台导入")}</h2><p>${escapeHtml(job.message)}</p></div><b>${job.progress}%</b></div>
+    <div class="job-progress-track"><i style="width:${job.progress}%"></i></div>
+    <div class="job-progress-meta"><span>任务 ${escapeHtml(job.id.slice(0, 8))}</span><span>尝试 ${job.attempt}/${job.max_attempts}</span></div>`;
+}
+
+// 最终失败时保留任务 ID，并提供人工重新尝试入口。
+function showImportJobFailure(job) {
+  importResult.className = "import-result is-error";
+  importResult.innerHTML = `<span class="empty-index">!</span><div><h2>导入失败</h2><p>${escapeHtml(job.error || job.message)}</p><button class="secondary-button retry-import-button" type="button">重新尝试</button></div>`;
+  importResult.querySelector(".retry-import-button").addEventListener("click", () => retryImportJob(job.id));
+}
+
+// 轮询后台状态直到成功或最终失败；页面刷新后也能通过本地任务 ID 恢复。
+async function monitorImportJob(jobId) {
+  localStorage.setItem("rag_import_job_id", jobId);
+  while (true) {
+    const response = await fetch(`/knowledge/jobs/${encodeURIComponent(jobId)}`);
+    const job = await response.json();
+    if (!response.ok) {
+      // FastAPI 重启后内存任务不存在，清除旧 ID 避免每次刷新重复报错。
+      if (response.status === 404) localStorage.removeItem("rag_import_job_id");
+      throw new Error(job.detail || "无法读取导入任务状态");
+    }
+    if (job.status === "completed") {
+      localStorage.removeItem("rag_import_job_id");
+      const items = job.result.items || [job.result.item];
+      showImportSuccess(items);
+      await loadCategories();
+      return job;
+    }
+    if (job.status === "failed") {
+      localStorage.removeItem("rag_import_job_id");
+      showImportJobFailure(job);
+      return job;
+    }
+    showImportProgress(job);
+    // 约每 700ms 更新一次，兼顾实时性和接口负载。
+    await new Promise((resolve) => setTimeout(resolve, 700));
+  }
+}
+
+// 手动重试会让同一个任务重新获得完整的自动重试次数。
+async function retryImportJob(jobId) {
+  showImportLoading("正在重新提交失败任务。");
+  try {
+    const response = await fetch(`/knowledge/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "重新尝试失败");
+    await monitorImportJob(jobId);
+  } catch (error) {
+    showImportError(error);
+  }
+}
+
 // 显示一次文件或网页导入的成功摘要。
 function showImportSuccess(items) {
   const totalChunks = items.reduce((sum, item) => sum + item.chunks, 0);
@@ -650,15 +719,15 @@ fileImportForm.addEventListener("submit", async (event) => {
     [...knowledgeFiles.files].forEach((file) => formData.append("files", file));
     const response = await fetch("/knowledge/files", { method: "POST", body: formData });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "文件导入失败");
-    showImportSuccess(payload.items);
+    if (!response.ok) throw new Error(payload.detail || "文件任务创建失败");
     knowledgeFiles.value = "";
     selectedFiles.textContent = "尚未选择文件";
     creatingImportCategory = false;
     newCategoryRow.hidden = true;
     newImportCategory.value = "";
     categoryRow.hidden = false;
-    await loadCategories();
+    // 后台任务立即返回 ID；随后持续显示实际处理进度。
+    await monitorImportJob(payload.id);
   } catch (error) {
     showImportError(error);
   } finally {
@@ -682,14 +751,13 @@ urlImportForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({ url, category }),
     });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "网页导入失败");
-    showImportSuccess([payload.item]);
+    if (!response.ok) throw new Error(payload.detail || "网页任务创建失败");
     knowledgeUrl.value = "";
     creatingImportCategory = false;
     newCategoryRow.hidden = true;
     newImportCategory.value = "";
     categoryRow.hidden = false;
-    await loadCategories();
+    await monitorImportJob(payload.id);
   } catch (error) {
     showImportError(error);
   } finally {
@@ -737,3 +805,6 @@ runEvaluationButton.addEventListener("click", async () => {
 checkHealth();
 // 页面加载后先取得分类，再恢复当前分类与 session_id 对应的历史消息。
 loadCategories().then(loadChatHistory);
+// 页面刷新不会中断后台线程；存在活动任务 ID 时继续显示其实时进度。
+const activeImportJobId = localStorage.getItem("rag_import_job_id");
+if (activeImportJobId) monitorImportJob(activeImportJobId).catch(showImportError);

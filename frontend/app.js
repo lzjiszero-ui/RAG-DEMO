@@ -201,8 +201,8 @@ async function loadCategories() {
   importCategory.value = [...importCategory.options].some((option) => option.value === previousImportCategory)
     ? previousImportCategory
     : "通用";
-  // 通用分类不允许整类删除。
-  deleteCategoryButton.disabled = importCategory.value === "通用";
+  // 任意真实分类（包括通用）都允许删除。
+  deleteCategoryButton.disabled = !importCategory.value;
   // 只有保存的分类仍存在时才恢复，否则使用“全部”。
   categorySelect.value = payload.categories.includes(savedCategory) ? savedCategory : "全部";
 }
@@ -664,7 +664,7 @@ knowledgeFiles.addEventListener("change", () => {
 
 // 切换已有分类时同步删除按钮状态。
 importCategory.addEventListener("change", () => {
-  deleteCategoryButton.disabled = importCategory.value === "通用";
+  deleteCategoryButton.disabled = !importCategory.value;
 });
 
 // 点击新建后在下拉框外显示独立输入行。
@@ -682,13 +682,13 @@ cancelNewCategoryButton.addEventListener("click", () => {
   newCategoryRow.hidden = true;
   newImportCategory.value = "";
   categoryRow.hidden = false;
-  deleteCategoryButton.disabled = importCategory.value === "通用";
+  deleteCategoryButton.disabled = !importCategory.value;
 });
 
 // 删除按钮会同时清理分类源文件和 Qdrant 中匹配该分类的 Point。
 deleteCategoryButton.addEventListener("click", async () => {
   const category = importCategory.value;
-  if (!category || category === "通用") return;
+  if (!category) return;
   if (!window.confirm(`确定删除“${category}”分类吗？\n该分类的源文件和 Qdrant 向量切片都会被删除，此操作无法撤销。`)) return;
   deleteCategoryButton.disabled = true;
   showImportLoading(`正在删除“${category}”分类及其向量切片。`);

@@ -318,8 +318,8 @@ def categories_endpoint() -> dict[str, list[str]]:
     knowledge_dir = Path(__file__).with_name("knowledge")
     # TXT、PDF、HTML 任一种支持文件存在时，该目录就是有效分类。
     supported = {".txt", ".pdf", ".html", ".htm"}
-    # 根目录文件属于“通用”。
-    categories = {"通用"} if any(path.is_file() and path.suffix.lower() in supported for path in knowledge_dir.iterdir()) else set()
+    # “通用”始终作为未指定分类时的默认入口，即使当前没有文件也保留。
+    categories = {"通用"}
     # 只添加实际包含支持文件的一级子目录。
     categories.update(path.name for path in knowledge_dir.iterdir() if path.is_dir() and any(item.is_file() and item.suffix.lower() in supported for item in path.rglob("*")))
     # “全部”固定排在第一项，其余分类按名称排序。

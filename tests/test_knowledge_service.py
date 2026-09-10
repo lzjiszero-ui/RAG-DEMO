@@ -67,7 +67,32 @@ def test_web_import_limits_characters_and_chunks(monkeypatch, tmp_path) -> None:
 
 def test_delete_category_rejects_protected_categories() -> None:
     with pytest.raises(ValueError, match="不能删除"):
-        knowledge_service.delete_category("通用")
+        knowledge_service.delete_category("全部")
+
+
+def test_delete_general_category_removes_folder_and_root_documents(monkeypatch, tmp_path) -> None:
+    general_dir = tmp_path / "通用"
+    general_dir.mkdir()
+    (general_dir / "uploaded.pdf").write_bytes(b"pdf")
+    (tmp_path / "legacy.txt").write_text("legacy", encoding="utf-8")
+    (tmp_path / "keep.md").write_text("not supported", encoding="utf-8")
+
+    class FakeClient:
+        def __init__(self, url):
+            pass
+
+        def collection_exists(self, name):
+            return False
+
+    monkeypatch.setattr(knowledge_service, "KNOWLEDGE_DIR", tmp_path)
+    monkeypatch.setattr(knowledge_service, "QdrantClient", FakeClient)
+
+    result = knowledge_service.delete_category("通用")
+
+    assert result["category"] == "通用"
+    assert not general_dir.exists()
+    assert not (tmp_path / "legacy.txt").exists()
+    assert (tmp_path / "keep.md").exists()
 
 
 def test_delete_category_removes_only_selected_directory_and_points(monkeypatch, tmp_path) -> None:

@@ -210,9 +210,9 @@ def import_url(url: str, category: str, progress_callback: ProgressCallback | No
 
 def delete_category(category: str) -> dict:
     """删除一个分类的 Qdrant Point 和 knowledge 源文件目录。"""
-    # “全部”不是实际分类，“通用”位于知识库根目录，两者都禁止整类删除。
-    if category in {"全部", "通用"}:
-        raise ValueError("“全部”和“通用”分类不能删除")
+    # “全部”只是跨分类检索选项，不是真实知识分类，因此不能删除。
+    if category == "全部":
+        raise ValueError("“全部”不是实际分类，不能删除")
     # 删除操作必须使用未经改变的安全名称，避免路径字符被悄悄替换后误删其他分类。
     safe_category = safe_name(category, "")
     if not safe_category or safe_category != category:
@@ -236,8 +236,13 @@ def delete_category(category: str) -> dict:
             points_selector=FilterSelector(filter=category_filter),
             wait=True,
         )
-    # 删除分类下的源文件，防止以后执行 ingest.py 时被重新写回 Qdrant。
+    # 删除分类目录下的源文件，防止以后执行 ingest.py 时被重新写回 Qdrant。
     if category_dir.is_dir():
         shutil.rmtree(category_dir)
+    # knowledge 根目录中的支持文件也属于“通用”，删除通用时需要一并清理。
+    if safe_category == "通用" and knowledge_root.is_dir():
+        for path in knowledge_root.iterdir():
+            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                path.unlink()
     logger.info("knowledge category deleted | category=%s | points=%d", safe_category, point_count)
     return {"category": safe_category, "deleted_points": point_count}

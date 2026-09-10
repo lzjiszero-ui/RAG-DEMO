@@ -42,6 +42,29 @@ def test_import_url_keeps_original_url_in_metadata(monkeypatch, tmp_path) -> Non
     assert captured["documents"][0].metadata["url"] == "https://example.com/guide"
 
 
+def test_web_import_limits_characters_and_chunks(monkeypatch, tmp_path) -> None:
+    captured = {}
+
+    def fake_upsert(documents):
+        captured["documents"] = documents
+        return len(documents)
+
+    large_html = ("<article>" + "".join(f"<p>{index}-" + "x" * 100 + "</p>" for index in range(30)) + "</article>").encode()
+    monkeypatch.setattr(knowledge_service, "KNOWLEDGE_DIR", tmp_path)
+    monkeypatch.setattr(knowledge_service, "MAX_WEB_DOCUMENT_CHARS", 1200)
+    monkeypatch.setattr(knowledge_service, "MAX_WEB_CHUNKS", 1)
+    monkeypatch.setattr(knowledge_service, "fetch_web_page", lambda url: (large_html, url))
+    monkeypatch.setattr("ingest.contextualize_chunk", lambda source, document, chunk: "context")
+    monkeypatch.setattr(knowledge_service, "upsert_source_documents", fake_upsert)
+
+    result = knowledge_service.import_url("https://example.com/large", "网页")
+
+    assert result["characters"] == 1200
+    assert result["chunks"] == 1
+    assert result["truncated"] is True
+    assert len(captured["documents"]) == 1
+
+
 def test_delete_category_rejects_protected_categories() -> None:
     with pytest.raises(ValueError, match="不能删除"):
         knowledge_service.delete_category("通用")

@@ -61,3 +61,7 @@ MAX_WEB_PAGE_MB = int(os.getenv("MAX_WEB_PAGE_MB", "5"))
 IMPORT_MAX_ATTEMPTS = max(1, int(os.getenv("IMPORT_MAX_ATTEMPTS", "3")))
 # 自动重试前等待的秒数，避免依赖服务短暂异常时立即连续失败。
 IMPORT_RETRY_DELAY_SECONDS = max(0.0, float(os.getenv("IMPORT_RETRY_DELAY_SECONDS", "2")))
+# 网页清洗后的正文最大字符数，防止模板数据产生超大索引任务。
+MAX_WEB_DOCUMENT_CHARS = max(1000, int(os.getenv("MAX_WEB_DOCUMENT_CHARS", "50000")))
+# 单个网页最多写入的切片数量，作为字符上限后的第二层保护。
+MAX_WEB_CHUNKS = max(1, int(os.getenv("MAX_WEB_CHUNKS", "100")))

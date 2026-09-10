@@ -75,6 +75,8 @@ LOG_LEVEL=INFO
 QUERY_REWRITE_REASONING=true
 MAX_UPLOAD_MB=15
 MAX_WEB_PAGE_MB=5
+MAX_WEB_DOCUMENT_CHARS=50000
+MAX_WEB_CHUNKS=100
 ```
 
 图形界面的“知识导入”页提供两种增量入口：
@@ -88,6 +90,8 @@ MAX_WEB_PAGE_MB=5
 当前任务队列保存在 FastAPI 进程内存中，适合本地学习和单进程运行；刷新页面可以恢复仍存在的任务进度，但重启 FastAPI 会清空任务记录。生产环境应进一步替换为 Redis + Celery/RQ，并让多个 Web 进程共享状态。
 
 前台导入不会重建整个 Collection。它只删除 `metadata.source` 相同的旧 Point，再写入该来源的新切片，因此其他分类和文件会保留。上传原文件也会保存至 `knowledge/分类名/`，以后执行 `ingest.py` 全量重建时仍然存在。网页抓取会拒绝本机、内网和非 HTML 地址，并分别受 `MAX_WEB_PAGE_MB` 与 `MAX_UPLOAD_MB` 限制。部分依赖 JavaScript 动态渲染或禁止爬取的网站可能无法提取完整正文。
+
+网页正文提取会删除脚本、样式、隐藏模板、`textarea`、导航、页脚、表单等非正文节点，优先选择 `article`、`main` 或 `[role=main]`，并对重复行去重。`MAX_WEB_DOCUMENT_CHARS` 限制清洗后保留的最大正文字符数，`MAX_WEB_CHUNKS` 限制单个网页最终写入的最大切片数；发生截断时页面会明确提示。原始 HTML 仍会完整保存在 `knowledge/分类名/`，限制只影响提取后用于向量化的正文。
 
 删除分类会精确删除 Qdrant 中 `metadata.category` 等于该分类的 Point，同时删除 `knowledge/分类名/` 目录下的源文件，其他分类不受影响。页面会在执行这个不可恢复的操作前要求确认。
 

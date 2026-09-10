@@ -389,7 +389,7 @@ async function retryImportJob(jobId) {
 function showImportSuccess(items) {
   const totalChunks = items.reduce((sum, item) => sum + item.chunks, 0);
   importResult.className = "import-result is-success";
-  importResult.innerHTML = `<span class="import-check">✓</span><div><h2>导入完成 · ${totalChunks} 个切片</h2><div class="import-items">${items.map((item) => `<p><b>${escapeHtml(item.source)}</b><span>${item.characters} 字符 · ${item.chunks} 切片</span></p>`).join("")}</div></div>`;
+  importResult.innerHTML = `<span class="import-check">✓</span><div><h2>导入完成 · ${totalChunks} 个切片</h2><div class="import-items">${items.map((item) => `<p><b>${escapeHtml(item.source)}</b><span>${item.characters} 字符 · ${item.chunks} 切片${item.truncated ? " · 已按网页保护上限截断" : ""}</span></p>`).join("")}</div></div>`;
 }
 
 // 显示后端返回的安全错误信息。

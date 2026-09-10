@@ -25,11 +25,11 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
 
 # 导入上传与网页体积限制。
-from config import COLLECTION_NAME, MAX_UPLOAD_MB, MAX_WEB_PAGE_MB, QDRANT_URL
+from config import COLLECTION_NAME, MAX_UPLOAD_MB, MAX_WEB_CHUNKS, MAX_WEB_DOCUMENT_CHARS, MAX_WEB_PAGE_MB, QDRANT_URL
 # 复用命令行导入中的文件解析、切片和 Contextual Retrieval。
 from ingest import SUPPORTED_EXTENSIONS, build_documents, extract_text
 # 导入单来源覆盖写入函数。
-from rag import upsert_source_documents
+from rag import split_text, upsert_source_documents
 
 # 创建当前模块的日志记录器。
 logger = logging.getLogger(__name__)
@@ -67,6 +67,8 @@ def import_bytes(
     category: str,
     original_url: str | None = None,
     progress_callback: ProgressCallback | None = None,
+    max_characters: int | None = None,
+    max_chunks: int | None = None,
 ) -> dict:
     """解析一个上传文件，保存原文，并覆盖写入该来源的向量切片。"""
     # 空文件没有可索引内容。
@@ -84,12 +86,28 @@ def import_bytes(
         progress_callback("parsing", 8, f"正在解析 {filename}")
     # 先解析并确认存在正文，失败文件不会写入 knowledge 目录。
     text = extract_text(content, extension)
+    # 记录清洗后原始长度，网页超过保护上限时用于向用户解释截断原因。
+    original_characters = len(text)
+    # 只对调用方明确指定上限的网页正文执行字符截断，本地文档保持完整。
+    if max_characters and len(text) > max_characters:
+        text = text[:max_characters]
     # 生成受控的保存位置及 metadata。
     destination, source, safe_category = source_location(category, filename)
     # 保存原始文件，让下一次 ingest.py 全量重建时仍能包含前台上传内容。
     destination.write_bytes(content)
     # 使用文件 stem 作为 Qdrant Dashboard 中可读的 Point 名称前缀。
-    documents = build_documents(text, source, safe_category, destination.stem, progress_callback=progress_callback)
+    # 提前统计完整切片数，让上限在 Contextual Retrieval 之前生效，避免多余模型调用。
+    full_chunk_count = len(split_text(text))
+    documents = build_documents(
+        text,
+        source,
+        safe_category,
+        destination.stem,
+        progress_callback=progress_callback,
+        max_chunks=max_chunks,
+    )
+    # 记录是否因为切片数量超过上限而被截断。
+    chunks_truncated = bool(max_chunks and full_chunk_count > max_chunks)
     # 网页来源额外写入原始 URL，使回答的引用可以追溯到真实页面。
     if original_url:
         for document in documents:
@@ -102,7 +120,14 @@ def import_bytes(
         progress_callback("writing", 95, f"Qdrant 已写入 {count} 个切片")
     logger.info("uploaded knowledge imported | source=%s | chars=%d | chunks=%d", source, len(text), count)
     # 返回前台需要的结果摘要，不回传完整原文。
-    return {"source": source, "category": safe_category, "characters": len(text), "chunks": count}
+    return {
+        "source": source,
+        "category": safe_category,
+        "characters": len(text),
+        "original_characters": original_characters,
+        "chunks": count,
+        "truncated": original_characters > len(text) or chunks_truncated,
+    }
 
 
 def validate_public_url(url: str) -> None:
@@ -175,6 +200,8 @@ def import_url(url: str, category: str, progress_callback: ProgressCallback | No
         category,
         original_url=final_url,
         progress_callback=progress_callback,
+        max_characters=MAX_WEB_DOCUMENT_CHARS,
+        max_chunks=MAX_WEB_CHUNKS,
     )
     # 额外保存原始网页 URL，供页面明确展示抓取目标。
     result["url"] = final_url

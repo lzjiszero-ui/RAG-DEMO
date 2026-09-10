@@ -31,6 +31,23 @@ def test_extract_html_keeps_visible_text_and_removes_script() -> None:
     assert "alert" not in text
 
 
+def test_extract_html_prefers_article_and_removes_template_text() -> None:
+    content = """
+    <html><body>
+      <textarea>very large template data</textarea>
+      <nav>navigation</nav>
+      <article><h1>Article title</h1><p>Useful paragraph</p><p>Useful paragraph</p></article>
+      <footer>footer text</footer>
+    </body></html>
+    """.encode()
+
+    text = extract_text(content, ".html")
+
+    assert text == "Article title\nUseful paragraph"
+    assert "template" not in text
+    assert "navigation" not in text
+
+
 def test_load_documents_supports_html(tmp_path: Path) -> None:
     (tmp_path / "guide.html").write_text("<h1>HTML knowledge</h1><p>Imported body</p>", encoding="utf-8")
 

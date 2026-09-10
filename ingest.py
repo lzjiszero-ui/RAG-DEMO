@@ -66,10 +66,25 @@ def html_to_text(content: bytes) -> str:
     # BeautifulSoup 会读取 meta charset；没有声明编码时使用其自动检测结果。
     soup = BeautifulSoup(content, "html.parser")
     # 删除不会展示给读者、也不应进入知识库的节点。
-    for node in soup(["script", "style", "noscript", "svg"]):
+    for node in soup(["script", "style", "noscript", "svg", "template", "textarea", "nav", "footer", "aside", "form"]):
         node.decompose()
+    # 删除通过标准属性明确隐藏的模板节点。
+    for node in soup.select("[hidden], [aria-hidden='true']"):
+        node.decompose()
+    # 文章页优先使用 article 或 main 中正文最多的候选区域。
+    candidates = soup.select("article, main, [role='main']")
+    content_root = max(candidates, key=lambda node: len(node.get_text(" ", strip=True))) if candidates else (soup.body or soup)
     # 用换行保留标题和段落边界，便于递归切片器优先保持段落完整。
-    text = soup.get_text("\n", strip=True)
+    raw_text = content_root.get_text("\n", strip=True)
+    # 删除完全相同的重复行，常见于响应式导航和重复模板。
+    seen: set[str] = set()
+    lines = []
+    for line in raw_text.splitlines():
+        normalized = re.sub(r"\s+", " ", line).strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            lines.append(normalized)
+    text = "\n".join(lines)
     # 合并过多空行，减少导航布局产生的无意义空白。
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
@@ -103,16 +118,20 @@ def build_documents(
     point_stem: str,
     contextual_retrieval: bool = CONTEXTUAL_RETRIEVAL,
     progress_callback: Callable[[str, int, str], None] | None = None,
+    max_chunks: int | None = None,
 ) -> list[Document]:
     """把一份已解析文本转换成可写入 Qdrant 的 Document 切片。"""
     # 拒绝空文件以及没有文本层的扫描 PDF。
     if not document_text.strip():
         raise ValueError("文件中没有可提取的文本；扫描版 PDF 需要先进行 OCR")
     # 使用项目统一的切片大小和 overlap 配置。
-    chunks = split_text(document_text)
+    all_chunks = split_text(document_text)
+    # 网页导入可以设置切片保护上限；命令行和本地文件默认不限制。
+    chunks = all_chunks[:max_chunks] if max_chunks else all_chunks
     # 切片完成后立即报告数量，页面无需等待全部上下文生成才有反馈。
     if progress_callback:
-        progress_callback("chunking", 20, f"文本切分完成，共 {len(chunks)} 个切片")
+        suffix = f"，已限制为前 {len(chunks)} 个" if len(all_chunks) > len(chunks) else ""
+        progress_callback("chunking", 20, f"文本切分完成，共 {len(all_chunks)} 个切片{suffix}")
     # 收集这一个来源生成的全部 LangChain Document。
     documents: list[Document] = []
     # 逐片生成可检索正文及来源元数据。

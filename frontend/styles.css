@@ -195,9 +195,10 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
 }
 /* 知识导入页沿用主界面的卡片语言，并给长 URL 和文件名留出换行空间。 */
 .import-view { display: grid; gap: 24px; }
-.import-heading { display: grid; grid-template-columns: 1fr minmax(220px, 320px); gap: 28px; align-items: end; padding: 30px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel); }
-.import-heading h2 { margin: 6px 0 12px; font-size: clamp(28px, 4vw, 48px); line-height: 1.08; }
-.import-heading p:last-child { max-width: 720px; color: var(--muted); line-height: 1.7; }
+.import-heading { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 320px); gap: 24px; align-items: end; padding: 20px 28px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
+.import-heading .eyebrow { margin-bottom: 9px; }
+.import-heading h2 { margin: 0 0 8px; font-size: clamp(24px, 2.7vw, 34px); line-height: 1.08; letter-spacing: -.035em; white-space: nowrap; }
+.import-heading p:last-child { max-width: 720px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .import-category, .url-field { display: grid; gap: 10px; color: var(--muted); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
 .import-category input, .import-category select, .url-field input { width: 100%; padding: 15px 16px; border: 1px solid var(--line); border-radius: 12px; background: #15191d; color: var(--text); outline: none; text-transform: none; letter-spacing: normal; }
 .import-category select { cursor: pointer; color-scheme: dark; }
@@ -252,6 +253,7 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
 
 @media (max-width: 760px) {
   .import-heading, .import-grid { grid-template-columns: 1fr; }
+  .import-heading h2 { white-space: normal; }
   .import-card { min-height: 0; }
   .ragas-metrics { grid-template-columns: repeat(2, 1fr); }
   .ragas-cases p { grid-template-columns: 1fr; gap: 6px; }

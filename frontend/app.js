@@ -193,14 +193,14 @@ async function loadCategories() {
   });
   // 重建真正的分类下拉框，并在末尾保留新建分类入口。
   const previousImportCategory = importCategory.value;
-  importCategory.innerHTML = payload.categories
-    .filter((category) => category !== "全部")
+  const importCategories = payload.categories.filter((category) => category !== "全部");
+  importCategory.innerHTML = importCategories.length ? importCategories
     .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`)
-    .join("");
+    .join("") : '<option value="">暂无分类</option>';
   // 刷新列表时尽量保留用户原来的选择。
   importCategory.value = [...importCategory.options].some((option) => option.value === previousImportCategory)
     ? previousImportCategory
-    : "通用";
+    : (importCategories[0] || "");
   // 任意真实分类（包括通用）都允许删除。
   deleteCategoryButton.disabled = !importCategory.value;
   // 只有保存的分类仍存在时才恢复，否则使用“全部”。
@@ -401,7 +401,9 @@ function showImportError(error) {
 // 返回当前要写入的分类：已有分类取下拉值，新分类取输入框内容。
 function selectedImportCategory() {
   // 新分类没有填写名称时自动回退到“通用”。
-  return creatingImportCategory ? (newImportCategory.value.trim() || "通用") : importCategory.value;
+  return creatingImportCategory
+    ? (newImportCategory.value.trim() || "通用")
+    : (importCategory.value || "通用");
 }
 
 // 把 0 到 1 的指标转换成一位小数百分比。

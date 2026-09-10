@@ -2,6 +2,7 @@
 
 # 导入 dataclass，用简洁的数据类表示最终检索结果。
 from dataclasses import dataclass
+import json
 # 导入正则表达式，用于给 BM25 补充中文字符与二元词分词。
 import re
 # 导入日志模块，用于输出 RAG 各阶段的重要状态。
@@ -37,6 +38,7 @@ from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchVa
 from config import (
     # 最终生成答案时使用的聊天模型。
     CHAT_MODEL,
+    CITATION_VERIFY_ENABLED,
     # 相邻切片期望重叠的字符数。
     CHUNK_OVERLAP,
     # 单个切片允许的最大字符数。
@@ -47,6 +49,8 @@ from config import (
     EMBEDDING_MODEL,
     # Ollama 服务地址。
     OLLAMA_URL,
+    MULTI_QUERY_COUNT,
+    MULTI_QUERY_ENABLED,
     # Qdrant 服务地址。
     QDRANT_URL,
     # Query Rewrite 是否开启模型推理模式。
@@ -233,6 +237,14 @@ class SearchHit:
     matched_text: str = ""
     # 父段落序号；生成回答时 text 使用更完整的父段落。
     parent_index: int = 0
+    # PDF 来源页码；普通文本和网页为 None。
+    page: int | None = None
+    # PDF 页面或解析章节名称。
+    section: str = "正文"
+    # text、table、mixed 或 ocr，用于说明解析方式。
+    content_type: str = "text"
+    # 是否由 OCR 识别得到文字。
+    ocr_used: bool = False
 
 
 # 创建一个连接现有 Qdrant Collection 的 LangChain VectorStore。
@@ -366,6 +378,10 @@ def candidates_to_hits(documents_with_scores: list[tuple[Document, float]], limi
             url=str(document.metadata.get("url", "")),
             matched_text=str(document.metadata.get("original_text") or document.page_content),
             parent_index=int(document.metadata.get("parent_index", 0)),
+            page=document.metadata.get("page"),
+            section=str(document.metadata.get("section", "正文")),
+            content_type=str(document.metadata.get("content_type", "text")),
+            ocr_used=bool(document.metadata.get("ocr_used", False)),
         ))
         if len(hits) >= limit:
             break
@@ -435,6 +451,10 @@ def rerank_candidates(
             url=str(document.metadata.get("url", "")),
             matched_text=str(document.metadata.get("original_text") or document.page_content),
             parent_index=int(document.metadata.get("parent_index", 0)),
+            page=document.metadata.get("page"),
+            section=str(document.metadata.get("section", "正文")),
+            content_type=str(document.metadata.get("content_type", "text")),
+            ocr_used=bool(document.metadata.get("ocr_used", False)),
         ))
         if limit is not None and len(hits) >= limit:
             break
@@ -515,13 +535,106 @@ def rewrite_query(question: str, chat_history: str = "（无历史对话）") ->
     return effective_query
 
 
+@dataclass
+class QueryPlan:
+    """Query Router 生成的分类与多条互补检索查询。"""
+    category: str
+    queries: list[str]
+
+
+def parse_json_object(text: str) -> dict:
+    """从模型可能带 Markdown 围栏的输出中提取 JSON 对象。"""
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.IGNORECASE)
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("model did not return a JSON object")
+    return json.loads(cleaned[start:end + 1])
+
+
+def plan_queries(question: str, rewritten_query: str, chat_history: str, selected_category: str, available_categories: list[str]) -> QueryPlan:
+    """选择允许的知识分类，并生成覆盖实体、关键词和语义的多条查询。"""
+    if not MULTI_QUERY_ENABLED:
+        return QueryPlan(selected_category, [rewritten_query])
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "你是RAG Query Router。输出严格JSON，不要解释。category必须来自允许分类；用户已指定具体分类时必须原样保留。queries生成互补检索表达，保留专名和数字，不要回答问题。"),
+        ("human", "允许分类：{categories}\n用户指定分类：{selected_category}\n历史：{chat_history}\n原问题：{question}\n主查询：{rewritten_query}\n输出格式：{{\"category\":\"分类\",\"queries\":[\"查询1\",\"查询2\"]}}"),
+    ])
+    model = ChatOllama(model=CHAT_MODEL, base_url=OLLAMA_URL, temperature=0, reasoning=False, format="json")
+    try:
+        raw = (prompt | model | StrOutputParser()).invoke({
+            "categories": json.dumps(available_categories, ensure_ascii=False),
+            "selected_category": selected_category,
+            "chat_history": chat_history,
+            "question": question,
+            "rewritten_query": rewritten_query,
+        })
+        payload = parse_json_object(raw)
+        routed_category = str(payload.get("category", selected_category))
+        if selected_category != "全部":
+            routed_category = selected_category
+        elif routed_category not in available_categories:
+            routed_category = "全部"
+        queries = [rewritten_query]
+        for item in payload.get("queries", []):
+            query = str(item).strip()
+            if query and query not in queries:
+                queries.append(query)
+        queries = queries[:MULTI_QUERY_COUNT]
+        logger.info("query routing completed | category=%s | queries=%s", routed_category, queries)
+        return QueryPlan(routed_category, queries)
+    except Exception:
+        logger.exception("query routing failed; using rewritten query")
+        return QueryPlan(selected_category, [rewritten_query])
+
+
+def retrieve_multi_query_candidates(queries: list[str], category: str) -> list[tuple[Document, float]]:
+    """分别召回多条查询，用跨查询倒数排名融合并去重候选。"""
+    merged: dict[tuple[str, int], tuple[Document, float]] = {}
+    for query in queries:
+        for rank, (document, _) in enumerate(retrieve_mode_candidates(query, category), start=1):
+            key = (str(document.metadata.get("source", "")), int(document.metadata.get("chunk_index", 0)))
+            previous_document, previous_score = merged.get(key, (document, 0.0))
+            merged[key] = (previous_document, previous_score + 1.0 / (60 + rank))
+    return sorted(merged.values(), key=lambda item: item[1], reverse=True)[:RETRIEVAL_K]
+
+
+def verify_citations(answer: str, hits: list[SearchHit]) -> dict:
+    """验证回答中的引用编号及每条结论是否得到相应资料支持。"""
+    reference_numbers = [int(value) for value in re.findall(r"\[Reference\s+(\d+)\]", answer, flags=re.IGNORECASE)]
+    invalid = sorted({number for number in reference_numbers if number < 1 or number > len(hits)})
+    if not CITATION_VERIFY_ENABLED:
+        return {"enabled": False, "status": "skipped", "claims": [], "invalid_references": invalid}
+    if not reference_numbers:
+        return {"enabled": True, "status": "warning", "claims": [], "invalid_references": [], "message": "回答没有引用标记"}
+    context = "\n\n".join(f"[Reference {index}]\n{hit.text}" for index, hit in enumerate(hits, start=1))
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "你是引用审计器。逐条检查回答中带[Reference N]的事实结论是否被对应资料直接支持。只输出JSON：{{\"claims\":[{{\"claim\":\"...\",\"references\":[1],\"supported\":true,\"reason\":\"...\"}}]}}。不要使用外部知识。"),
+        ("human", "资料：\n{context}\n\n回答：\n{answer}"),
+    ])
+    try:
+        model = ChatOllama(model=CHAT_MODEL, base_url=OLLAMA_URL, temperature=0, reasoning=False, format="json")
+        payload = parse_json_object((prompt | model | StrOutputParser()).invoke({"context": context, "answer": answer}))
+        claims = payload.get("claims", []) if isinstance(payload.get("claims", []), list) else []
+        normalized = [{
+            "claim": str(item.get("claim", "")),
+            "references": [int(number) for number in item.get("references", []) if str(number).isdigit()],
+            "supported": bool(item.get("supported", False)),
+            "reason": str(item.get("reason", "")),
+        } for item in claims if isinstance(item, dict)]
+        all_supported = bool(normalized) and all(item["supported"] for item in normalized) and not invalid
+        return {"enabled": True, "status": "passed" if all_supported else "warning", "claims": normalized, "invalid_references": invalid}
+    except Exception as exc:
+        logger.exception("citation verification failed")
+        return {"enabled": True, "status": "error", "claims": [], "invalid_references": invalid, "message": str(exc)}
+
+
 # 定义生成函数，接收原问题和最终检索片段。
 def generate(question: str, hits: list[SearchHit], chat_history: str = "（无历史对话）") -> str:
     """用检索片段增强 Prompt，并调用本地 Qwen 生成答案。"""
     # 给每个片段添加 Reference 和来源标签，再用空行连接成上下文。
     context = "\n\n".join(
         # 每条参考资料包含顺序编号、来源文件和实际正文。
-        f"[Reference {index} | Source: {hit.source}]\n{hit.text}"
+        f"[Reference {index} | Source: {hit.source}{f' | Page: {hit.page}' if hit.page else ''}]\n{hit.text}"
         # 从 1 开始给重排后的 hits 编号。
         for index, hit in enumerate(hits, start=1)
     )

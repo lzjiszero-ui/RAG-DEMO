@@ -3,6 +3,7 @@
 # 导入 Path，用于递归查找知识文件和处理相对路径。
 from pathlib import Path
 from io import BytesIO
+from dataclasses import dataclass
 # 导入回调类型，用于把长文档逐切片进度通知给后台任务管理器。
 from collections.abc import Callable
 # 导入缓存装饰器，复用上下文生成 Chain 和模型连接。
@@ -13,6 +14,9 @@ import re
 
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
+import pdfplumber
+import pymupdf
+from rapidocr_onnxruntime import RapidOCR
 
 # 导入 LangChain Document，用统一结构保存正文和元数据。
 from langchain_core.documents import Document
@@ -28,13 +32,80 @@ from rag import rebuild_index, split_text
 # 导入统一日志初始化函数。
 from logging_config import configure_logging
 # 导入 Contextual Retrieval 开关、文档长度限制和模型配置。
-from config import CHAT_MODEL, CONTEXTUAL_MAX_DOCUMENT_CHARS, CONTEXTUAL_RETRIEVAL, OLLAMA_URL, PARENT_CHUNK_OVERLAP, PARENT_CHUNK_SIZE
+from config import CHAT_MODEL, CONTEXTUAL_MAX_DOCUMENT_CHARS, CONTEXTUAL_RETRIEVAL, OCR_ENABLED, OCR_MIN_TEXT_CHARS, OLLAMA_URL, PARENT_CHUNK_OVERLAP, PARENT_CHUNK_SIZE
 
 # 创建当前导入模块的日志记录器。
 logger = logging.getLogger(__name__)
 
 # 声明前台和命令行导入共同支持的文件扩展名。
 SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".html", ".htm"}
+
+
+@dataclass
+class ExtractedSection:
+    """表示带页码和内容类型的一段解析结果。"""
+    text: str
+    page: int | None = None
+    section: str = "正文"
+    content_type: str = "text"
+    ocr_used: bool = False
+
+
+@lru_cache(maxsize=1)
+def ocr_engine() -> RapidOCR:
+    """延迟加载本地 OCR 模型，普通文本 PDF 不承担模型启动成本。"""
+    return RapidOCR()
+
+
+def table_to_markdown(table: list[list[object | None]]) -> str:
+    """把 PDF 表格转换成适合检索与回答引用的 Markdown。"""
+    rows = [[str(cell or "").replace("|", "\\|").replace("\n", " ").strip() for cell in row] for row in table if row]
+    if not rows:
+        return ""
+    width = max(len(row) for row in rows)
+    normalized = [row + [""] * (width - len(row)) for row in rows]
+    header = normalized[0]
+    body = normalized[1:]
+    return "\n".join([
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(["---"] * width) + " |",
+        *("| " + " | ".join(row) + " |" for row in body),
+    ])
+
+
+def ocr_pdf_page(pdf_document: pymupdf.Document, page_index: int) -> str:
+    """把指定 PDF 页面渲染成图片并使用 RapidOCR 提取文字。"""
+    page = pdf_document.load_page(page_index)
+    image = page.get_pixmap(matrix=pymupdf.Matrix(2, 2), alpha=False).tobytes("png")
+    result, _ = ocr_engine()(image)
+    return "\n".join(str(item[1]).strip() for item in (result or []) if len(item) > 1 and str(item[1]).strip())
+
+
+def extract_sections(content: bytes, suffix: str) -> list[ExtractedSection]:
+    """解析文件并保留 PDF 页码、表格和 OCR 来源信息。"""
+    extension = suffix.lower()
+    if extension != ".pdf":
+        return [ExtractedSection(text=extract_text(content, extension))]
+    reader = PdfReader(BytesIO(content))
+    pdf_document = pymupdf.open(stream=content, filetype="pdf")
+    sections: list[ExtractedSection] = []
+    with pdfplumber.open(BytesIO(content)) as plumber_document:
+        for page_index, page in enumerate(reader.pages):
+            page_number = page_index + 1
+            text = (page.extract_text() or "").strip()
+            ocr_used = False
+            if OCR_ENABLED and len(re.sub(r"\s+", "", text)) < OCR_MIN_TEXT_CHARS:
+                text = ocr_pdf_page(pdf_document, page_index).strip()
+                ocr_used = bool(text)
+            tables = plumber_document.pages[page_index].extract_tables()
+            markdown_tables = [table_to_markdown(table) for table in tables]
+            markdown_tables = [table for table in markdown_tables if table]
+            combined = "\n\n".join(part for part in [text, *markdown_tables] if part).strip()
+            if combined:
+                content_type = "table" if markdown_tables and not text else "mixed" if markdown_tables else "ocr" if ocr_used else "text"
+                sections.append(ExtractedSection(combined, page_number, f"第 {page_number} 页", content_type, ocr_used))
+    pdf_document.close()
+    return sections
 
 
 @lru_cache(maxsize=1)
@@ -119,6 +190,8 @@ def build_documents(
     contextual_retrieval: bool = CONTEXTUAL_RETRIEVAL,
     progress_callback: Callable[[str, int, str], None] | None = None,
     max_chunks: int | None = None,
+    base_metadata: dict | None = None,
+    chunk_offset: int = 0,
 ) -> list[Document]:
     """把一份已解析文本转换成可写入 Qdrant 的 Document 切片。"""
     # 拒绝空文件以及没有文本层的扫描 PDF。
@@ -143,6 +216,7 @@ def build_documents(
     documents: list[Document] = []
     # 逐片生成可检索正文及来源元数据。
     for index, (parent_index, parent_text, chunk) in enumerate(chunks):
+        absolute_index = chunk_offset + index
         # Contextual Retrieval 较慢，因此在每个切片前报告真实序号。
         if progress_callback and contextual_retrieval:
             progress_callback("contextualizing", 20 + int(50 * index / max(1, len(chunks))), f"正在生成切片上下文 {index + 1}/{len(chunks)}")
@@ -151,13 +225,14 @@ def build_documents(
         documents.append(Document(page_content=indexed_content, metadata={
             "source": source,
             "category": category,
-            "point_name": f"{point_stem}-{index + 1}",
-            "chunk_index": index,
-            "parent_index": parent_index,
+            "point_name": f"{point_stem}-{absolute_index + 1}",
+            "chunk_index": absolute_index,
+            "parent_index": chunk_offset + parent_index,
             "parent_text": parent_text,
             "contextual_summary": contextual_summary,
             "original_text": chunk,
             "contextualized": bool(contextual_summary),
+            **(base_metadata or {}),
         }))
     # 无论是否开启 Contextual Retrieval，都明确表示文档构建阶段完成。
     if progress_callback:
@@ -179,8 +254,20 @@ def load_documents(knowledge_dir: Path, contextual_retrieval: bool = CONTEXTUAL_
         # 将相对路径转换成跨平台统一的 source 字符串。
         source = relative_path.as_posix()
         # 按文件格式提取正文，再走统一的切片与 Contextual Retrieval 流程。
-        document_text = extract_text(path.read_bytes(), path.suffix)
-        file_documents = build_documents(document_text, source, category, path.stem, contextual_retrieval)
+        sections = extract_sections(path.read_bytes(), path.suffix)
+        document_text = "\n\n".join(section.text for section in sections)
+        file_documents = []
+        for section in sections:
+            section_documents = build_documents(
+                section.text,
+                source,
+                category,
+                path.stem,
+                contextual_retrieval,
+                base_metadata={"page": section.page, "section": section.section, "content_type": section.content_type, "ocr_used": section.ocr_used},
+                chunk_offset=len(file_documents),
+            )
+            file_documents.extend(section_documents)
         # 输出当前知识文件产生的切片数量。
         logger.info("knowledge file loaded | source=%s | chunks=%d", source, len(file_documents))
         # 合并到本次完整重建列表。

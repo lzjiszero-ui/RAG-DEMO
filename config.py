@@ -71,3 +71,13 @@ MAX_WEB_DOCUMENT_CHARS = max(1000, int(os.getenv("MAX_WEB_DOCUMENT_CHARS", "5000
 MAX_WEB_CHUNKS = max(1, int(os.getenv("MAX_WEB_CHUNKS", "100")))
 # 单次 RAGAS 评估最多使用的用例数；LLM-as-a-Judge 会产生多次模型调用。
 RAGAS_MAX_CASES = max(1, int(os.getenv("RAGAS_MAX_CASES", "4")))
+# 扫描 PDF 页面没有足够文本层时，是否使用本地 RapidOCR 识别图片文字。
+OCR_ENABLED = os.getenv("OCR_ENABLED", "true").lower() in {"true", "1", "yes", "on"}
+# 页面文本少于该字符数时才执行 OCR，避免普通文字 PDF 被重复识别。
+OCR_MIN_TEXT_CHARS = max(0, int(os.getenv("OCR_MIN_TEXT_CHARS", "30")))
+# 是否让 Qwen 把一个问题扩展成多条互补检索查询。
+MULTI_QUERY_ENABLED = os.getenv("MULTI_QUERY_ENABLED", "true").lower() in {"true", "1", "yes", "on"}
+# Multi-Query 最多生成的查询数量，包含主查询。
+MULTI_QUERY_COUNT = min(5, max(1, int(os.getenv("MULTI_QUERY_COUNT", "3"))))
+# 是否在回答生成后检查每个带引用的结论是否被资料支持。
+CITATION_VERIFY_ENABLED = os.getenv("CITATION_VERIFY_ENABLED", "true").lower() in {"true", "1", "yes", "on"}

@@ -3,7 +3,7 @@ from pathlib import Path
 from langchain_core.documents import Document
 
 import rag
-from ingest import extract_text, load_documents
+from ingest import extract_sections, extract_text, load_documents, table_to_markdown
 
 
 def test_load_documents_keeps_source_and_chunk_index(tmp_path: Path) -> None:
@@ -16,8 +16,8 @@ def test_load_documents_keeps_source_and_chunk_index(tmp_path: Path) -> None:
     documents = load_documents(tmp_path, contextual_retrieval=False)
 
     assert [document.metadata for document in documents] == [
-        {"source": "first.txt", "category": "通用", "point_name": "first-1", "chunk_index": 0, "parent_index": 0, "parent_text": "first knowledge", "contextual_summary": "", "original_text": "first knowledge", "contextualized": False},
-        {"source": "nested/second.txt", "category": "nested", "point_name": "second-1", "chunk_index": 0, "parent_index": 0, "parent_text": "second knowledge", "contextual_summary": "", "original_text": "second knowledge", "contextualized": False},
+        {"source": "first.txt", "category": "通用", "point_name": "first-1", "chunk_index": 0, "parent_index": 0, "parent_text": "first knowledge", "contextual_summary": "", "original_text": "first knowledge", "contextualized": False, "page": None, "section": "正文", "content_type": "text", "ocr_used": False},
+        {"source": "nested/second.txt", "category": "nested", "point_name": "second-1", "chunk_index": 0, "parent_index": 0, "parent_text": "second knowledge", "contextual_summary": "", "original_text": "second knowledge", "contextualized": False, "page": None, "section": "正文", "content_type": "text", "ocr_used": False},
     ]
 
 
@@ -236,3 +236,81 @@ def test_bm25_tokenize_adds_chinese_bigrams_and_keeps_technical_terms() -> None:
     assert "蒋门" in tokens
     assert "门神" in tokens
     assert "top_k" in tokens
+
+
+def test_table_to_markdown_preserves_rows() -> None:
+    markdown = table_to_markdown([["名称", "数量"], ["苹果", "2"]])
+
+    assert "| 名称 | 数量 |" in markdown
+    assert "| 苹果 | 2 |" in markdown
+
+
+def test_pdf_extraction_preserves_page_numbers(tmp_path: Path, monkeypatch) -> None:
+    import pymupdf
+
+    pdf_path = tmp_path / "pages.pdf"
+    document = pymupdf.open()
+    for text in ("First page knowledge", "Second page knowledge"):
+        page = document.new_page()
+        page.insert_text((72, 72), text)
+    document.save(pdf_path)
+    document.close()
+    monkeypatch.setattr("ingest.OCR_ENABLED", False)
+
+    sections = extract_sections(pdf_path.read_bytes(), ".pdf")
+
+    assert [section.page for section in sections] == [1, 2]
+    assert "First page knowledge" in sections[0].text
+    assert "Second page knowledge" in sections[1].text
+
+
+def test_query_router_keeps_forced_category_and_returns_multiple_queries(monkeypatch) -> None:
+    class FakeChain:
+        def __or__(self, other):
+            return self
+
+        def invoke(self, values):
+            return '{"category":"西游记","queries":["武松 蒋门神","快活林 事件"]}'
+
+    chain = FakeChain()
+    monkeypatch.setattr(rag, "MULTI_QUERY_ENABLED", True)
+    monkeypatch.setattr(rag.ChatPromptTemplate, "from_messages", lambda messages: chain)
+    monkeypatch.setattr(rag, "ChatOllama", lambda **kwargs: chain)
+    monkeypatch.setattr(rag, "StrOutputParser", lambda: chain)
+
+    plan = rag.plan_queries("谁打了蒋门神", "蒋门神是谁打的", "（无历史对话）", "水浒传", ["全部", "水浒传", "西游记"])
+
+    assert plan.category == "水浒传"
+    assert plan.queries == ["蒋门神是谁打的", "武松 蒋门神", "快活林 事件"]
+
+
+def test_multi_query_merges_duplicate_candidates_with_rrf(monkeypatch) -> None:
+    shared = Document(page_content="shared", metadata={"source": "book.txt", "chunk_index": 0})
+    unique = Document(page_content="unique", metadata={"source": "other.txt", "chunk_index": 1})
+    monkeypatch.setattr(rag, "retrieve_mode_candidates", lambda query, category: [(shared, 0.9)] if query == "q1" else [(shared, 0.8), (unique, 0.7)])
+
+    candidates = rag.retrieve_multi_query_candidates(["q1", "q2"], "全部")
+
+    assert [document.page_content for document, _ in candidates] == ["shared", "unique"]
+    assert candidates[0][1] > candidates[1][1]
+
+
+def test_citation_verification_reports_supported_claim(monkeypatch) -> None:
+    class FakeChain:
+        def __or__(self, other):
+            return self
+
+        def invoke(self, values):
+            return '{"claims":[{"claim":"武松打了蒋门神","references":[1],"supported":true,"reason":"资料明确记载"}]}'
+
+    chain = FakeChain()
+    monkeypatch.setattr(rag, "CITATION_VERIFY_ENABLED", True)
+    monkeypatch.setattr(rag.ChatPromptTemplate, "from_messages", lambda messages: chain)
+    monkeypatch.setattr(rag, "ChatOllama", lambda **kwargs: chain)
+    monkeypatch.setattr(rag, "StrOutputParser", lambda: chain)
+    hit = rag.SearchHit("武松醉打蒋门神", 0.8, 0.9, 0, "水浒传.txt")
+
+    result = rag.verify_citations("武松打了蒋门神。[Reference 1]", [hit])
+
+    assert result["status"] == "passed"
+    assert result["claims"][0]["supported"] is True

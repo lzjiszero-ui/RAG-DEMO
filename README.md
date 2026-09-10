@@ -4,7 +4,7 @@
 
 ```text
 knowledge 中的 TXT / PDF / HTML（多个文件或网页抓取结果）
-  → 按格式提取纯文本并清理 HTML 非正文节点
+  → 按格式提取正文；PDF 保留页码、表格 Markdown，扫描页使用 RapidOCR
   → 先切父段落，再把父段落切成用于检索的子切片（Parent-Child Chunking）
   → OllamaEmbeddings（bge-m3）生成 Dense Embedding
   → FastEmbed BM25 生成 Sparse Embedding
@@ -13,11 +13,13 @@ knowledge 中的 TXT / PDF / HTML（多个文件或网页抓取结果）
 用户问题
   → 根据 session_id 加载最近的多轮对话
   → ChatOllama（qwen3.5:4b）执行 Query Rewrite
+  → Query Router 选择分类并生成 Multi-Query
   → Qdrant 使用 Dense + BM25 + RRF Hybrid Search 召回候选 Document
   → bge-reranker-base 对候选结果重新排序
   → 用命中子切片定位并去重父段落，扩大最终回答上下文
   → ChatPromptTemplate 注入参考资料
   → ChatOllama（qwen3.5:4b）根据资料回答
+  → Citation Verification 逐条核验 [Reference N]
 ```
 
 ## 已有环境
@@ -48,7 +50,7 @@ uv sync
 uv run python ingest.py
 ```
 
-把 `.txt`、`.pdf`、`.html` 或 `.htm` 文件放入 `knowledge/` 目录，然后执行导入。这一步会重建 Qdrant 中的 `simple_rag_docs` Collection，但不会影响其他项目的 Collection。PDF 必须包含文本层，扫描图片型 PDF 需要先 OCR。根目录文件归为“通用”，一级子目录名会成为分类，例如：
+把 `.txt`、`.pdf`、`.html` 或 `.htm` 文件放入 `knowledge/` 目录，然后执行导入。这一步会重建 Qdrant 中的 `simple_rag_docs` Collection，但不会影响其他项目的 Collection。PDF 会逐页保留 `page`、`section`、`content_type` 和 `ocr_used` Metadata，表格转换为 Markdown；缺少文本层的扫描页面会自动使用本地 RapidOCR。根目录文件归为“通用”，一级子目录名会成为分类，例如：
 
 ```text
 knowledge/
@@ -81,6 +83,11 @@ MAX_WEB_PAGE_MB=5
 MAX_WEB_DOCUMENT_CHARS=50000
 MAX_WEB_CHUNKS=100
 RAGAS_MAX_CASES=4
+OCR_ENABLED=true
+OCR_MIN_TEXT_CHARS=30
+MULTI_QUERY_ENABLED=true
+MULTI_QUERY_COUNT=3
+CITATION_VERIFY_ENABLED=true
 ```
 
 图形界面的“知识导入”页提供两种增量入口：
@@ -120,6 +127,12 @@ Parent-Child Chunking 使用较小的子切片进行精确召回，同时把所�
 
 `QUERY_REWRITE_REASONING=true` 会让 Qwen 在改写查询时启用推理模式；设为 `false` 可降低改写耗时。图形界面通过 `/ask/stream` 接收真实进度事件，会依次显示 Query Rewrite、Qdrant Retrieval、Cross-Encoder 和 Qwen Generation 的执行状态。
 
+`MULTI_QUERY_ENABLED=true` 会在 Query Rewrite 后运行 Query Router。页面指定具体分类时，该分类仍是不可绕过的 Qdrant Filter；只有选择“全部”时 Router 才能从现有分类中自动选择。Router 最多生成 `MULTI_QUERY_COUNT` 条查询，各自召回后使用跨查询倒数排名融合并去重，再交给 Cross-Encoder 统一重排。
+
+`CITATION_VERIFY_ENABLED=true` 会在答案生成后让本地 Qwen 检查每个带 `[Reference N]` 的事实结论。页面以绿色标记资料支持的结论，以黄色警告无依据、不存在的引用编号或无法完成的审计。它是自动辅助校验，不等同于人工事实核查。
+
+`OCR_ENABLED=true` 仅在 PDF 某页可提取文字少于 `OCR_MIN_TEXT_CHARS` 时加载 RapidOCR。普通文字 PDF 不执行 OCR。首次 OCR 会加载本地 ONNX 模型，速度会比文本层提取慢。
+
 `MAX_HISTORY_TURNS=6` 表示每个 `session_id` 最多保留最近 6 轮问答。历史会同时提供给 Query Rewrite 和最终生成 Prompt，因此“它是什么”“上一点再解释一下”这类追问可以结合上下文理解。当前实现使用进程内存保存历史，重启 FastAPI 后会清空；生产环境可进一步替换为 Redis 或数据库。
 
 修改分块参数或知识文件后，需要重新执行导入命令。纯向量模式统一使用 `SCORE_THRESHOLD=0.3`，不再区分“全部”和具体分类阈值；Qdrant 最多召回 `RETRIEVAL_K` 条，`hybrid_rerank` 模式再由 Reranker 重新评分并保留 `TOP_K` 条。首次重排会加载约 1 GB 的 Reranker 模型到 `.models/`。
@@ -145,7 +158,7 @@ uv run uvicorn main:app --reload --port 8001
 }
 ```
 
-接口以 NDJSON 流返回执行状态、Query Rewrite 结果、最终答案、来源文件、Qdrant 的 `vector_score` 和重排后的 `rerank_score`。`mode=rag` 执行固定 RAG 管线，`mode=agent` 执行 Agent Tool Calling。改写查询只用于 Qdrant 召回；Reranker 和最终回答继续使用用户原始问题。
+接口以 NDJSON 流返回执行状态、Query Rewrite、Multi-Query、最终答案、页码、来源、检索分数和引用校验结果。`mode=rag` 执行固定 RAG 管线，`mode=agent` 执行 Agent Tool Calling。Multi-Query 用于扩大召回；Reranker、回答生成和引用校验继续使用用户原始问题。
 
 ## 4. 检索评估
 

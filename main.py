@@ -30,10 +30,11 @@ from evaluation import evaluate
 # 导入 RAGAS LLM-as-a-Judge 回答质量评估。
 from ragas_evaluation import evaluate_answer_quality
 # 导入完整 RAG 问答入口。
-from rag import candidates_to_hits, generate, rerank_candidates, retrieve_mode_candidates, rewrite_query
+from rag import candidates_to_hits, generate, plan_queries, rerank_candidates, retrieve_multi_query_candidates, rewrite_query, verify_citations
 # 导入统一日志初始化函数。
 from logging_config import configure_logging
 from agent import run_agent
+from agent_tools import list_categories
 from knowledge_service import delete_category
 # 导入后台任务创建、状态读取和手动重试入口。
 from import_jobs import get_job, retry_job, submit_file_job, submit_url_job
@@ -107,10 +108,14 @@ def ask_event_stream(question: str, session_id: str, category: str = "全部"):
     logger.info("stream query rewritten | original=%r | rewritten=%r", question, rewritten_query)
     # 返回实际用于 Qdrant 的查询。
     yield stream_line({"type": "status", "step": "rewrite", "state": "completed", "message": "查询改写完成", "detail": rewritten_query})
+    # Query Router 在“全部”时可以选择分类，并生成多条互补检索查询。
+    yield stream_line({"type": "status", "step": "router", "state": "running", "message": "正在选择知识分类并生成 Multi-Query"})
+    query_plan = plan_queries(question, rewritten_query, chat_history, category, list_categories())
+    yield stream_line({"type": "status", "step": "router", "state": "completed", "message": f"分类：{query_plan.category} · {len(query_plan.queries)} 条查询", "category": query_plan.category, "queries": query_plan.queries})
     # 通知前端 Qdrant 向量召回已开始。
     yield stream_line({"type": "status", "step": "retrieve", "state": "running", "message": f"正在执行 {RETRIEVAL_MODE} 检索", "retrieval_mode": RETRIEVAL_MODE})
     # 使用改写后的查询召回候选片段。
-    candidates = retrieve_mode_candidates(rewritten_query, category)
+    candidates = retrieve_multi_query_candidates(query_plan.queries, query_plan.category)
     # 返回候选数量和最高 RRF 融合分数。
     yield stream_line({"type": "status", "step": "retrieve", "state": "completed", "message": f"召回 {len(candidates)} 个候选片段", "candidate_count": len(candidates), "top_score": float(candidates[0][1]) if candidates else None})
     # 没有候选时直接返回拒答，不再加载 Reranker 或调用生成模型。
@@ -120,7 +125,7 @@ def ask_event_stream(question: str, session_id: str, category: str = "全部"):
         # 拒答也属于完整一轮会话，保存后续问题可能需要的上下文。
         append_turn(memory_id, ChatTurn(question=question, answer=answer, rewritten_query=rewritten_query))
         # 输出无命中的最终结果。
-        yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": category, "retrieval_mode": RETRIEVAL_MODE})
+        yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "retrieval_queries": query_plan.queries, "sources": [], "citation_verification": {"enabled": True, "status": "skipped", "claims": []}, "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": query_plan.category, "retrieval_mode": RETRIEVAL_MODE})
         # 结束生成器。
         return
     # hybrid_rerank 执行 Cross-Encoder，其他模式直接保留召回排名。
@@ -137,10 +142,14 @@ def ask_event_stream(question: str, session_id: str, category: str = "全部"):
     answer = generate(question, hits, chat_history)
     # 通知前端生成阶段已经结束。
     yield stream_line({"type": "status", "step": "generate", "state": "completed", "message": "回答生成完成"})
+    # 使用资料再次检查每个引用结论，页面将支持和警告逐条展示。
+    yield stream_line({"type": "status", "step": "verify", "state": "running", "message": "正在校验回答引用真实性"})
+    citation_verification = verify_citations(answer, hits)
+    yield stream_line({"type": "status", "step": "verify", "state": "completed", "message": "引用校验完成", "verification_status": citation_verification["status"]})
     # 将当前问答保存到所属会话，供下一轮理解指代。
     append_turn(memory_id, ChatTurn(question=question, answer=answer, rewritten_query=rewritten_query))
     # 把最终答案、改写查询和来源作为最后一个事件返回。
-    yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "sources": [hit.__dict__ for hit in hits], "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": category, "retrieval_mode": RETRIEVAL_MODE})
+    yield stream_line({"type": "result", "answer": answer, "rewritten_query": rewritten_query, "retrieval_queries": query_plan.queries, "sources": [hit.__dict__ for hit in hits], "citation_verification": citation_verification, "elapsed_ms": (perf_counter() - started) * 1000, "session_id": session_id, "category": query_plan.category, "retrieval_mode": RETRIEVAL_MODE})
 
 
 def agent_event_stream(question: str, session_id: str):
@@ -164,11 +173,15 @@ def agent_event_stream(question: str, session_id: str):
                 "未调用知识检索工具",
             )
             append_turn(memory_id, ChatTurn(question=question, answer=answer, rewritten_query=question))
+            yield stream_line({"type": "status", "step": "verify", "state": "running", "message": "正在校验 Agent 回答引用真实性"})
+            citation_verification = verify_citations(answer, hits)
+            yield stream_line({"type": "status", "step": "verify", "state": "completed", "message": "引用校验完成", "verification_status": citation_verification["status"]})
             yield stream_line({
                 "type": "result",
                 "answer": answer,
                 "rewritten_query": "由 Agent 动态决定工具参数",
                 "sources": [hit.__dict__ for hit in hits],
+                "citation_verification": citation_verification,
                 "tool_trace": tool_trace,
                 "agent_selected_category": selected_category,
                 "elapsed_ms": (perf_counter() - started) * 1000,

@@ -24,6 +24,9 @@ const retrievalModeLabel = document.querySelector("#retrieval-mode-label");
 const totalTimeElement = document.querySelector("#total-time");
 // 获取 Query Rewrite 结果容器，用于展示实际送入 Qdrant 的查询。
 const rewrittenQueryElement = document.querySelector("#rewritten-query");
+const multiQueryBox = document.querySelector("#multi-query-box");
+const retrievalQueriesElement = document.querySelector("#retrieval-queries");
+const citationVerificationElement = document.querySelector("#citation-verification");
 // 获取当前处理阶段的用户可见说明。
 const progressMessage = document.querySelector("#progress-message");
 // 获取 Reasoning 开关状态文字。
@@ -237,6 +240,10 @@ function resetPipeline() {
   progressMessage.textContent = "准备执行 RAG 流程";
   toolTrace.hidden = true;
   toolTraceList.innerHTML = "";
+  multiQueryBox.hidden = true;
+  retrievalQueriesElement.textContent = "";
+  citationVerificationElement.hidden = true;
+  citationVerificationElement.innerHTML = "";
 }
 
 // 将 Agent 实际执行的工具名称、参数和结果数量显示出来。
@@ -286,7 +293,7 @@ function renderSources(sources, retrievalMode = "unknown") {
     <article class="source-card">
       <!-- 显示来源、片段编号和两个检索分数。 -->
       <div class="source-meta">
-        <span class="source-name">[Reference ${index + 1}] ${escapeHtml(source.category)} · ${escapeHtml(source.point_name)} · ${source.url ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.source)}</a>` : escapeHtml(source.source)}</span>
+        <span class="source-name">[Reference ${index + 1}] ${escapeHtml(source.category)} · ${escapeHtml(source.point_name)}${source.page ? ` · 第 ${source.page} 页` : ""}${source.ocr_used ? " · OCR" : ""}${source.content_type === "table" || source.content_type === "mixed" ? " · 表格" : ""} · ${source.url ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.source)}</a>` : escapeHtml(source.source)}</span>
         <span class="source-scores">${source.vector_score.toFixed(4)}${retrievalMode.includes("hybrid_rerank") ? ` / ${source.rerank_score.toFixed(4)}` : ""}</span>
       </div>
       <!-- 显示经过 HTML 转义的知识片段正文。 -->
@@ -313,6 +320,23 @@ function selectTab(tab) {
   importView.hidden = !importSelected;
   // 未选中评估页时隐藏整个评估区域。
   evalView.hidden = !evaluationSelected;
+}
+
+// 将后端的逐条引用审计结果展示为支持或警告。
+function renderCitationVerification(result) {
+  if (!result || result.status === "skipped") {
+    citationVerificationElement.hidden = true;
+    return;
+  }
+  citationVerificationElement.hidden = false;
+  const invalid = (result.invalid_references || []).length
+    ? `<p><b class="is-warning">⚠</b><span>不存在的引用编号：${result.invalid_references.join(", ")}</span></p>`
+    : "";
+  const claims = (result.claims || []).map((item) => `
+    <p><b class="${item.supported ? "is-supported" : "is-warning"}">${item.supported ? "✓" : "⚠"}</b><span>${escapeHtml(item.claim)}${item.reason ? ` — ${escapeHtml(item.reason)}` : ""}</span></p>
+  `).join("");
+  const emptyMessage = !claims ? `<p><b class="is-warning">⚠</b><span>${escapeHtml(result.message || "没有可验证的带引用结论")}</span></p>` : "";
+  citationVerificationElement.innerHTML = `<h3>引用真实性校验 · ${result.status === "passed" ? "全部支持" : "需要确认"}</h3>${invalid}${claims}${emptyMessage}`;
 }
 
 // 将知识导入区域切换成执行中状态。
@@ -597,10 +621,14 @@ askForm.addEventListener("submit", async (event) => {
     appendChatMessage("assistant", payload.answer);
     // 显示经过 Query Rewrite 后实际用于向量召回的查询。
     rewrittenQueryElement.textContent = payload.rewritten_query;
+    const retrievalQueries = payload.retrieval_queries || [];
+    multiQueryBox.hidden = retrievalQueries.length <= 1;
+    retrievalQueriesElement.textContent = retrievalQueries.map((query, index) => `${index + 1}. ${query}`).join("  ·  ");
     // 把后端统计的毫秒转换成秒，并保留两位小数。
     totalTimeElement.textContent = `总耗时 ${(payload.elapsed_ms / 1000).toFixed(2)} 秒`;
     // 渲染后端返回的参考来源。
     renderSources(payload.sources, payload.retrieval_mode);
+    renderCitationVerification(payload.citation_verification);
     // Agent 模式下展示模型真正发起过的每一次 Tool Calling。
     renderToolTrace(payload.tool_trace || []);
   // 捕获问答请求错误。
@@ -611,6 +639,8 @@ askForm.addEventListener("submit", async (event) => {
     answerElement.textContent = `查询失败：${error.message}`;
     // 请求失败时清空上一次的 Query Rewrite 结果。
     rewrittenQueryElement.textContent = "";
+    multiQueryBox.hidden = true;
+    citationVerificationElement.hidden = true;
     // 请求失败时不显示上一次请求的耗时。
     totalTimeElement.textContent = "";
     // 清空上一次可能存在的来源卡片。

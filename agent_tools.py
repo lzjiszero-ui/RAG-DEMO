@@ -12,8 +12,9 @@ from rag import SearchHit, candidates_to_hits, rerank_candidates, retrieve_mode_
 def list_categories() -> list[str]:
     """扫描 knowledge 目录，返回当前可检索的知识分类。"""
     knowledge_dir = Path(__file__).with_name("knowledge")
-    categories = {"通用"} if any(knowledge_dir.glob("*.txt")) else set()
-    categories.update(path.name for path in knowledge_dir.iterdir() if path.is_dir() and any(path.rglob("*.txt")))
+    supported = {".txt", ".pdf", ".html", ".htm"}
+    categories = {"通用"} if any(path.is_file() and path.suffix.lower() in supported for path in knowledge_dir.iterdir()) else set()
+    categories.update(path.name for path in knowledge_dir.iterdir() if path.is_dir() and any(item.is_file() and item.suffix.lower() in supported for item in path.rglob("*")))
     return ["全部", *sorted(categories)]
 
 
@@ -39,6 +40,10 @@ def search_knowledge(query: str, category: str = "全部") -> tuple[list[SearchH
                 "source": hit.source,
                 "category": hit.category,
                 "point_name": hit.point_name,
+                "page": hit.page,
+                "section": hit.section,
+                "content_type": hit.content_type,
+                "ocr_used": hit.ocr_used,
                 "score": hit.rerank_score if RETRIEVAL_MODE == "hybrid_rerank" else hit.vector_score,
             }
             for index, hit in enumerate(hits, start=1)

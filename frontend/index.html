@@ -92,9 +92,11 @@
               <ol class="pipeline" id="pipeline">
                 <li data-step="memory"><span>1</span><div><b>Chat Memory</b><small>等待执行</small></div></li>
                 <li data-step="rewrite"><span>2</span><div><b>Query Rewrite</b><small id="reasoning-status">Reasoning: ON</small></div></li>
-                <li data-step="retrieve"><span>3</span><div><b>Retrieval Mode</b><small>读取 .env 配置</small></div></li>
-                <li data-step="rerank"><span>4</span><div><b>Cross-Encoder</b><small>等待执行</small></div></li>
-                <li data-step="generate"><span>5</span><div><b>Qwen Generation</b><small>等待执行</small></div></li>
+                <li data-step="router"><span>3</span><div><b>Router / Multi-Query</b><small>等待执行</small></div></li>
+                <li data-step="retrieve"><span>4</span><div><b>Retrieval Mode</b><small>读取 .env 配置</small></div></li>
+                <li data-step="rerank"><span>5</span><div><b>Cross-Encoder</b><small>等待执行</small></div></li>
+                <li data-step="generate"><span>6</span><div><b>Qwen Generation</b><small>等待执行</small></div></li>
+                <li data-step="verify"><span>7</span><div><b>Citation Verification</b><small>等待执行</small></div></li>
                 <li data-step="agent"><span>A</span><div><b>Agent Decision</b><small>Agent 模式使用</small></div></li>
                 <li data-step="tool"><span>T</span><div><b>Tool Calling</b><small>Agent 模式使用</small></div></li>
               </ol>
@@ -104,8 +106,10 @@
             <div class="answer-heading"><span>ANSWER</span><div class="answer-stats"><small id="total-time"></small><small id="source-count"></small></div></div>
             <!-- 显示 Query Rewrite 后实际用于 Qdrant 召回的查询。 -->
             <div class="rewrite-box"><small>REWRITTEN QUERY</small><p id="rewritten-query"></p></div>
+            <div class="rewrite-box" id="multi-query-box" hidden><small>QUERY ROUTER · MULTI-QUERY</small><p id="retrieval-queries"></p></div>
             <div class="tool-trace" id="tool-trace" hidden><small>AGENT TOOL CALLING · <span id="agent-selected-category"></span></small><div id="tool-trace-list"></div></div>
             <article class="answer" id="answer"></article>
+            <section class="citation-verification" id="citation-verification" hidden></section>
             <div class="sources-heading"><h3>检索依据</h3><span id="retrieval-mode-label">RETRIEVAL SCORE</span></div>
             <div class="source-list" id="source-list"></div>
           </div>
@@ -137,7 +141,7 @@
           <form class="import-card" id="file-import-form">
             <span class="import-index">01 · FILES</span>
             <h3>上传本地文件</h3>
-            <p>支持 TXT、PDF、HTML/HTM，一次最多选择 10 个。扫描版 PDF 需要先进行 OCR。</p>
+            <p>支持 TXT、PDF、HTML/HTM，一次最多选择 10 个。PDF 会保留页码和表格，扫描页面自动执行 OCR。</p>
             <label class="file-drop" for="knowledge-files">
               <input id="knowledge-files" type="file" accept=".txt,.pdf,.html,.htm,text/plain,application/pdf,text/html" multiple required />
               <b>选择文件</b><span id="selected-files">尚未选择文件</span>

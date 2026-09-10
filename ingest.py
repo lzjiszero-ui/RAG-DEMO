@@ -28,7 +28,7 @@ from rag import rebuild_index, split_text
 # 导入统一日志初始化函数。
 from logging_config import configure_logging
 # 导入 Contextual Retrieval 开关、文档长度限制和模型配置。
-from config import CHAT_MODEL, CONTEXTUAL_MAX_DOCUMENT_CHARS, CONTEXTUAL_RETRIEVAL, OLLAMA_URL
+from config import CHAT_MODEL, CONTEXTUAL_MAX_DOCUMENT_CHARS, CONTEXTUAL_RETRIEVAL, OLLAMA_URL, PARENT_CHUNK_OVERLAP, PARENT_CHUNK_SIZE
 
 # 创建当前导入模块的日志记录器。
 logger = logging.getLogger(__name__)
@@ -125,7 +125,14 @@ def build_documents(
     if not document_text.strip():
         raise ValueError("文件中没有可提取的文本；扫描版 PDF 需要先进行 OCR")
     # 使用项目统一的切片大小和 overlap 配置。
-    all_chunks = split_text(document_text)
+    # 先切成较大的父段落，再在每个父段落内部生成用于精准检索的子切片。
+    parent_chunks = split_text(document_text, chunk_size=PARENT_CHUNK_SIZE, overlap=PARENT_CHUNK_OVERLAP)
+    child_records = [
+        (parent_index, parent_text, child_text)
+        for parent_index, parent_text in enumerate(parent_chunks)
+        for child_text in split_text(parent_text)
+    ]
+    all_chunks = child_records
     # 网页导入可以设置切片保护上限；命令行和本地文件默认不限制。
     chunks = all_chunks[:max_chunks] if max_chunks else all_chunks
     # 切片完成后立即报告数量，页面无需等待全部上下文生成才有反馈。
@@ -135,7 +142,7 @@ def build_documents(
     # 收集这一个来源生成的全部 LangChain Document。
     documents: list[Document] = []
     # 逐片生成可检索正文及来源元数据。
-    for index, chunk in enumerate(chunks):
+    for index, (parent_index, parent_text, chunk) in enumerate(chunks):
         # Contextual Retrieval 较慢，因此在每个切片前报告真实序号。
         if progress_callback and contextual_retrieval:
             progress_callback("contextualizing", 20 + int(50 * index / max(1, len(chunks))), f"正在生成切片上下文 {index + 1}/{len(chunks)}")
@@ -146,6 +153,8 @@ def build_documents(
             "category": category,
             "point_name": f"{point_stem}-{index + 1}",
             "chunk_index": index,
+            "parent_index": parent_index,
+            "parent_text": parent_text,
             "contextual_summary": contextual_summary,
             "original_text": chunk,
             "contextualized": bool(contextual_summary),

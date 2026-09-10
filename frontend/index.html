@@ -167,7 +167,10 @@
             <h2>原始召回、重排与改写，<br />到底差在哪里？</h2>
             <p>对比 Dense 向量、Dense + BM25 Hybrid Search、Cross-Encoder 重排，以及 Query Rewrite 完整管线的准确率、排序质量与耗时。</p>
           </div>
-          <button class="primary-button eval-button" id="run-evaluation" type="button"><span>运行测试</span><b>↗</b></button>
+          <div class="eval-actions">
+            <button class="primary-button eval-button" id="run-evaluation" type="button"><span>运行检索测试</span><b>↗</b></button>
+            <button class="secondary-button eval-button" id="run-ragas" type="button"><span>运行 RAGAS</span></button>
+          </div>
         </div>
 
         <!-- 评估未运行时显示的提示。 -->
@@ -192,6 +195,8 @@
             </table>
           </div>
         </div>
+        <!-- RAGAS 使用本地 Qwen 评价最终回答与检索上下文的质量。 -->
+        <section class="ragas-panel" id="ragas-results" hidden></section>
       </section>
     </main>
     <!-- defer 确保 HTML 解析完成后再执行前端交互代码。 -->

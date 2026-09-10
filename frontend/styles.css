@@ -231,6 +231,19 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
 .job-progress-track i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .35s ease; }
 .job-progress-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
 .retry-import-button { margin-top: 14px; padding: 10px 14px; }
+.eval-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.eval-actions .secondary-button { min-height: 44px; }
+.ragas-panel { margin-top: 24px; padding: 24px; border: 1px solid rgba(215,255,95,.28); border-radius: 18px; background: var(--panel); }
+.ragas-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.ragas-metrics article { display: grid; gap: 8px; padding: 18px; border-radius: 13px; background: rgba(255,255,255,.04); }
+.ragas-metrics small { color: var(--muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.ragas-metrics b { font-size: 24px; }
+.ragas-cases { display: grid; gap: 8px; margin-top: 16px; }
+.ragas-cases p { display: grid; grid-template-columns: minmax(180px, .8fr) 2fr; gap: 16px; margin: 0; padding: 12px 0; border-top: 1px solid var(--line); }
+.ragas-cases span { color: var(--muted); line-height: 1.5; }
+.parent-child-context > small { color: var(--accent); font-size: 9px; letter-spacing: .12em; }
+.parent-child-context details { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
+.parent-child-context summary { color: var(--muted); cursor: pointer; font-size: 12px; }
 .import-check { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 50%; background: var(--accent); color: #10130a; font-size: 22px; font-weight: 800; }
 .import-items { display: grid; gap: 9px; margin-top: 14px; }
 .import-items p { display: flex; flex-wrap: wrap; gap: 8px 20px; }
@@ -240,4 +253,6 @@ textarea:focus { box-shadow: inset 0 0 0 1px rgba(215,255,95,.45), 0 0 0 4px rgb
 @media (max-width: 760px) {
   .import-heading, .import-grid { grid-template-columns: 1fr; }
   .import-card { min-height: 0; }
+  .ragas-metrics { grid-template-columns: repeat(2, 1fr); }
+  .ragas-cases p { grid-template-columns: 1fr; gap: 6px; }
 }

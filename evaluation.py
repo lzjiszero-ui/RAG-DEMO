@@ -281,6 +281,8 @@ def evaluate(cases: list[EvaluationCase] | None = None) -> dict[str, Any]:
                 "generation": {
                     "expected_answer": case.expected_answer,
                     "answer": generated_answer,
+                    # RAGAS 使用真正提供给 Qwen 的父段落上下文评价忠实度与召回率。
+                    "contexts": [hit.text for hit in rewritten_hits[:3]],
                     "answer_match": answer_match,
                     "citation_present": citation_present,
                     "generation_latency_ms": generation_latency_ms,

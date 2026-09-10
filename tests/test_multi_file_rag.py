@@ -16,8 +16,8 @@ def test_load_documents_keeps_source_and_chunk_index(tmp_path: Path) -> None:
     documents = load_documents(tmp_path, contextual_retrieval=False)
 
     assert [document.metadata for document in documents] == [
-        {"source": "first.txt", "category": "通用", "point_name": "first-1", "chunk_index": 0, "contextual_summary": "", "original_text": "first knowledge", "contextualized": False},
-        {"source": "nested/second.txt", "category": "nested", "point_name": "second-1", "chunk_index": 0, "contextual_summary": "", "original_text": "second knowledge", "contextualized": False},
+        {"source": "first.txt", "category": "通用", "point_name": "first-1", "chunk_index": 0, "parent_index": 0, "parent_text": "first knowledge", "contextual_summary": "", "original_text": "first knowledge", "contextualized": False},
+        {"source": "nested/second.txt", "category": "nested", "point_name": "second-1", "chunk_index": 0, "parent_index": 0, "parent_text": "second knowledge", "contextual_summary": "", "original_text": "second knowledge", "contextualized": False},
     ]
 
 
@@ -55,6 +55,19 @@ def test_load_documents_supports_html(tmp_path: Path) -> None:
 
     assert documents[0].metadata["source"] == "guide.html"
     assert "HTML knowledge" in documents[0].page_content
+
+
+def test_parent_child_chunking_keeps_large_parent_context(tmp_path: Path, monkeypatch) -> None:
+    long_text = "段落内容。" * 350
+    (tmp_path / "long.txt").write_text(long_text, encoding="utf-8")
+    monkeypatch.setattr("ingest.PARENT_CHUNK_SIZE", 900)
+    monkeypatch.setattr("ingest.PARENT_CHUNK_OVERLAP", 100)
+
+    documents = load_documents(tmp_path, contextual_retrieval=False)
+
+    assert len(documents) > 2
+    assert len(documents[0].metadata["parent_text"]) > len(documents[0].metadata["original_text"])
+    assert documents[0].metadata["parent_index"] == 0
 
 
 def test_load_documents_adds_contextual_retrieval_text(tmp_path: Path, monkeypatch) -> None:
@@ -193,6 +206,28 @@ def test_retrieve_skips_reranker_unless_mode_requires_it(monkeypatch) -> None:
     assert len(hits) == 1
     assert hits[0].vector_score == 0.8
     assert hits[0].rerank_score == 0.0
+
+
+def test_candidates_use_parent_context_and_deduplicate_same_parent() -> None:
+    documents = [
+        (
+            Document(page_content=f"indexed child {index}", metadata={
+                "source": "book.txt",
+                "chunk_index": index,
+                "parent_index": 0,
+                "parent_text": "complete parent paragraph",
+                "original_text": f"child {index}",
+            }),
+            0.9 - index * 0.1,
+        )
+        for index in range(2)
+    ]
+
+    hits = rag.candidates_to_hits(documents, limit=3)
+
+    assert len(hits) == 1
+    assert hits[0].text == "complete parent paragraph"
+    assert hits[0].matched_text == "child 0"
 
 
 def test_bm25_tokenize_adds_chinese_bigrams_and_keeps_technical_terms() -> None:

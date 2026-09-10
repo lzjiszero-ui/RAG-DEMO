@@ -31,6 +31,18 @@ def test_evaluate_endpoint(monkeypatch) -> None:
     assert response.json() == expected
 
 
+def test_ragas_evaluate_endpoint_reuses_latest_evaluation(monkeypatch) -> None:
+    expected_retrieval = {"case_count": 1, "summary": {}, "cases": []}
+    expected_ragas = {"framework": "RAGAS", "case_count": 1, "summary": {"faithfulness": 1.0}, "cases": []}
+    monkeypatch.setattr(main, "LAST_EVALUATION_RESULT", expected_retrieval)
+    monkeypatch.setattr(main, "evaluate_answer_quality", lambda result: expected_ragas if result is expected_retrieval else None)
+
+    response = client.post("/evaluate/ragas")
+
+    assert response.status_code == 200
+    assert response.json() == expected_ragas
+
+
 def test_ask_stream_reports_real_pipeline_steps(monkeypatch) -> None:
     candidate = (Document(page_content="context", metadata={"source": "guide.txt", "chunk_index": 0}), 0.8)
     hit = SearchHit(text="context", vector_score=0.8, rerank_score=0.9, chunk_index=0, source="guide.txt")

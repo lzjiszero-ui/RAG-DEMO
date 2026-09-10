@@ -52,6 +52,10 @@ RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-base")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
 # 读取相邻文本切片期望保留的重叠字符数。
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "80"))
+# Parent-Child Chunking 中交给生成模型的父段落目标字符数。
+PARENT_CHUNK_SIZE = int(os.getenv("PARENT_CHUNK_SIZE", "1600"))
+# 相邻父段落的期望重叠字符数。
+PARENT_CHUNK_OVERLAP = int(os.getenv("PARENT_CHUNK_OVERLAP", "200"))
 
 # 限制前台单个上传文件的体积，避免一次请求占用过多内存。
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "15"))
@@ -65,3 +69,5 @@ IMPORT_RETRY_DELAY_SECONDS = max(0.0, float(os.getenv("IMPORT_RETRY_DELAY_SECOND
 MAX_WEB_DOCUMENT_CHARS = max(1000, int(os.getenv("MAX_WEB_DOCUMENT_CHARS", "50000")))
 # 单个网页最多写入的切片数量，作为字符上限后的第二层保护。
 MAX_WEB_CHUNKS = max(1, int(os.getenv("MAX_WEB_CHUNKS", "100")))
+# 单次 RAGAS 评估最多使用的用例数；LLM-as-a-Judge 会产生多次模型调用。
+RAGAS_MAX_CASES = max(1, int(os.getenv("RAGAS_MAX_CASES", "4")))

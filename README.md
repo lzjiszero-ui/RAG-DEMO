@@ -5,7 +5,7 @@
 ```text
 knowledge 中的 TXT / PDF / HTML（多个文件或网页抓取结果）
   → 按格式提取纯文本并清理 HTML 非正文节点
-  → RecursiveCharacterTextSplitter 分块
+  → 先切父段落，再把父段落切成用于检索的子切片（Parent-Child Chunking）
   → OllamaEmbeddings（bge-m3）生成 Dense Embedding
   → FastEmbed BM25 生成 Sparse Embedding
   → QdrantVectorStore 同时保存 Dense / Sparse 向量
@@ -15,6 +15,7 @@ knowledge 中的 TXT / PDF / HTML（多个文件或网页抓取结果）
   → ChatOllama（qwen3.5:4b）执行 Query Rewrite
   → Qdrant 使用 Dense + BM25 + RRF Hybrid Search 召回候选 Document
   → bge-reranker-base 对候选结果重新排序
+  → 用命中子切片定位并去重父段落，扩大最终回答上下文
   → ChatPromptTemplate 注入参考资料
   → ChatOllama（qwen3.5:4b）根据资料回答
 ```
@@ -64,6 +65,8 @@ knowledge/
 ```dotenv
 CHUNK_SIZE=500
 CHUNK_OVERLAP=80
+PARENT_CHUNK_SIZE=1600
+PARENT_CHUNK_OVERLAP=200
 SCORE_THRESHOLD=0.3
 RETRIEVAL_MODE=hybrid_rerank
 CONTEXTUAL_RETRIEVAL=true
@@ -77,6 +80,7 @@ MAX_UPLOAD_MB=15
 MAX_WEB_PAGE_MB=5
 MAX_WEB_DOCUMENT_CHARS=50000
 MAX_WEB_CHUNKS=100
+RAGAS_MAX_CASES=4
 ```
 
 图形界面的“知识导入”页提供两种增量入口：
@@ -109,6 +113,8 @@ MAX_WEB_CHUNKS=100
 BM25 写入和查询前会对连续中文生成单字与二元词，例如“蒋门神”会补充“蒋门”“门神”，避免默认空格分词导致纯 `bm25` 模式无法命中中文。修改这段分词规则后需要重新执行 `ingest.py`。
 
 `CONTEXTUAL_RETRIEVAL=true` 会在导入阶段调用本地 Qwen，为每个切片生成不超过 80 字的文档级上下文，再把“来源 + 上下文 + 原始片段”一起生成 Dense 和 Sparse 向量。原文、上下文和是否成功增强会分别保存在 `metadata.original_text`、`metadata.contextual_summary`、`metadata.contextualized`。`CONTEXTUAL_MAX_DOCUMENT_CHARS` 限制提供给模型的完整文档长度。关闭该功能或修改 Prompt 后，需要重新执行 `ingest.py` 才会影响 Collection。
+
+Parent-Child Chunking 使用较小的子切片进行精确召回，同时把所属父段落交给 Qwen 回答。父段落由 `PARENT_CHUNK_SIZE` 和 `PARENT_CHUNK_OVERLAP` 控制；同一父段落内命中的多个子切片会自动合并，避免重复引用。首次启用或修改这些参数后必须重新执行 `uv run python ingest.py`，让 Qdrant Point 写入 `parent_index` 和 `parent_text`。
 
 `LOG_LEVEL=INFO` 会输出 Query Rewrite、向量召回、重排、生成和总请求耗时等关键日志。调试时可改为 `DEBUG`，只关注错误时可改为 `ERROR`。日志不会输出 Embedding 向量或完整知识片段。
 
@@ -146,6 +152,8 @@ uv run uvicorn main:app --reload --port 8001
 图形界面的“检索评估”页会读取 `eval/questions.json`，对比四条管线：Dense 向量召回、Dense + BM25 的 RRF 融合召回、Hybrid + Cross-Encoder、Query Rewrite + Hybrid + Cross-Encoder。评估还会执行最终回答生成，用 `expected_answer` 检查关键答案命中率和引用率。
 
 “加入 BM25 带来的变化”区域会直接计算 Hybrid 相对 Dense 的 Hit@1、Hit@3、MRR、nDCG@5 和平均耗时差值，并统计逐题排名提升、持平与下降的数量；逐题表也会单独显示 Dense → Hybrid 的排名变化。
+
+完成检索测试后，可以点击“运行 RAGAS”，使用本地 Qwen 和 bge-m3 对最终答案进行质量评估。页面会显示 Faithfulness（忠实度）、Answer Relevancy（答案相关性）、Context Precision（上下文精确率）和 Context Recall（上下文召回率）。`RAGAS_MAX_CASES` 用来限制单次评估题数，避免本地模型评估耗时过长；数值越大覆盖面越广，但运行越慢。
 
 也可以从命令行执行：
 

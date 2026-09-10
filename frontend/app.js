@@ -59,6 +59,9 @@ const importView = document.querySelector("#import-view");
 const evalView = document.querySelector("#eval-view");
 // 获取运行评估按钮。
 const runEvaluationButton = document.querySelector("#run-evaluation");
+// 获取独立运行 RAGAS 回答质量评估的按钮和结果面板。
+const runRagasButton = document.querySelector("#run-ragas");
+const ragasResults = document.querySelector("#ragas-results");
 // 获取评估尚未执行时的空状态。
 const evalEmpty = document.querySelector("#eval-empty");
 // 获取评估执行期间的加载状态。
@@ -287,7 +290,9 @@ function renderSources(sources, retrievalMode = "unknown") {
         <span class="source-scores">${source.vector_score.toFixed(4)}${retrievalMode.includes("hybrid_rerank") ? ` / ${source.rerank_score.toFixed(4)}` : ""}</span>
       </div>
       <!-- 显示经过 HTML 转义的知识片段正文。 -->
-      <p class="source-text">${escapeHtml(source.text)}</p>
+      ${source.matched_text && source.matched_text !== source.text
+        ? `<div class="parent-child-context"><small>命中子切片</small><p class="source-text">${escapeHtml(source.matched_text)}</p><details><summary>查看用于回答的父段落</summary><p class="source-text">${escapeHtml(source.text)}</p></details></div>`
+        : `<p class="source-text">${escapeHtml(source.text)}</p>`}
     </article>
   `).join("");
 }
@@ -428,6 +433,22 @@ function methodCard(name, label, metrics, highlighted = false) {
         <div class="metric"><small>AVG TIME</small><b>${milliseconds(metrics.avg_latency_ms)}</b></div>
       </div>
     </article>`;
+}
+
+// 把 RAGAS 四项 0-1 回答质量分数渲染成独立指标卡。
+function renderRagas(payload) {
+  const labels = {
+    faithfulness: "Faithfulness",
+    answer_relevancy: "Answer Relevancy",
+    context_precision: "Context Precision",
+    context_recall: "Context Recall",
+  };
+  const scoreText = (value) => value == null ? "失败" : percent(value);
+  ragasResults.innerHTML = `
+    <div class="case-heading"><div><span>LLM-AS-A-JUDGE · RAGAS</span><h3>回答质量评估</h3></div><small>${payload.case_count} 题 · ${(payload.elapsed_ms / 1000).toFixed(1)} 秒</small></div>
+    <div class="ragas-metrics">${Object.entries(labels).map(([key, label]) => `<article><small>${label}</small><b>${scoreText(payload.summary[key])}</b></article>`).join("")}</div>
+    <div class="ragas-cases">${payload.cases.map((item) => `<p><b>${escapeHtml(item.question)}</b><span>${Object.entries(labels).map(([key, label]) => `${label}: ${scoreText(item.scores[key])}`).join(" · ")}</span></p>`).join("")}</div>`;
+  ragasResults.hidden = false;
 }
 
 // 把数字排名转换成 #1 形式；未命中时显示横线。
@@ -800,6 +821,23 @@ runEvaluationButton.addEventListener("click", async () => {
     evalLoading.hidden = true;
     // 恢复评估按钮可点击状态。
     runEvaluationButton.disabled = false;
+  }
+});
+
+// 单独运行 RAGAS；若尚未运行检索评估，后端会先自动生成所需答案和上下文。
+runRagasButton.addEventListener("click", async () => {
+  runRagasButton.disabled = true;
+  ragasResults.hidden = false;
+  ragasResults.innerHTML = '<div class="eval-loading"><span class="loader"></span><div><h2>正在运行 RAGAS</h2><p>本地 Qwen 正在评价回答忠实度、相关性与上下文质量，可能需要数分钟。</p></div></div>';
+  try {
+    const response = await fetch("/evaluate/ragas", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "RAGAS 评估失败");
+    renderRagas(payload);
+  } catch (error) {
+    ragasResults.innerHTML = `<div><h2 class="error-message">RAGAS 评估失败</h2><p>${escapeHtml(error.message)}</p></div>`;
+  } finally {
+    runRagasButton.disabled = false;
   }
 });
 

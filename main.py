@@ -27,6 +27,8 @@ from config import MAX_UPLOAD_MB, OLLAMA_URL, QDRANT_URL, QUERY_REWRITE_REASONIN
 from chat_memory import ChatTurn, append_turn, clear_history, format_history, get_history, serialize_history
 # 导入检索评估主函数。
 from evaluation import evaluate
+# 导入 RAGAS LLM-as-a-Judge 回答质量评估。
+from ragas_evaluation import evaluate_answer_quality
 # 导入完整 RAG 问答入口。
 from rag import candidates_to_hits, generate, rerank_candidates, retrieve_mode_candidates, rewrite_query
 # 导入统一日志初始化函数。
@@ -47,6 +49,8 @@ app = FastAPI(title="Simple RAG", version="0.1.0")
 FRONTEND_DIR = Path(__file__).with_name("frontend")
 # 把 frontend 目录挂载到 /static，提供 CSS 和 JavaScript。
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+# 缓存最近一次检索评估，供随后运行的 RAGAS 复用答案与上下文。
+LAST_EVALUATION_RESULT: dict | None = None
 
 
 # 定义页面流式多轮聊天请求结构。
@@ -338,6 +342,9 @@ def evaluate_endpoint() -> dict:
     try:
         # 运行 questions.json 中的全部评估问题并返回指标。
         result = evaluate()
+        # 复用结果，避免 RAGAS 再次执行四条检索管线与回答生成。
+        global LAST_EVALUATION_RESULT
+        LAST_EVALUATION_RESULT = result
         # 输出测试数量和总耗时。
         logger.info("POST /evaluate completed | cases=%d | elapsed_ms=%.1f", result["case_count"], (perf_counter() - started) * 1000)
         # 返回完整评估结果。
@@ -347,4 +354,17 @@ def evaluate_endpoint() -> dict:
         # 输出评估异常堆栈。
         logger.exception("POST /evaluate failed | elapsed_ms=%.1f", (perf_counter() - started) * 1000)
         # 将评估错误转换成 HTTP 500 响应。
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# 注册独立的 RAGAS 回答质量评估接口。
+@app.post("/evaluate/ragas")
+def ragas_evaluate_endpoint() -> dict:
+    """计算回答忠实度、相关性、上下文精确率和召回率。"""
+    try:
+        # 允许直接运行；没有缓存时先自动执行原有检索评估。
+        retrieval_result = LAST_EVALUATION_RESULT or evaluate()
+        return evaluate_answer_quality(retrieval_result)
+    except Exception as exc:
+        logger.exception("POST /evaluate/ragas failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

@@ -229,6 +229,10 @@ class SearchHit:
     point_name: str = "unknown"
     # 网页抓取来源的原始公开 URL；本地文件没有该字段。
     url: str = ""
+    # 命中的小切片正文，用于解释检索依据和调试。
+    matched_text: str = ""
+    # 父段落序号；生成回答时 text 使用更完整的父段落。
+    parent_index: int = 0
 
 
 # 创建一个连接现有 Qdrant Collection 的 LangChain VectorStore。
@@ -343,9 +347,16 @@ def retrieve_mode_candidates(question: str, category: str = "全部") -> list[tu
 
 def candidates_to_hits(documents_with_scores: list[tuple[Document, float]], limit: int = TOP_K) -> list[SearchHit]:
     """把不需要 Reranker 的原始召回结果转换成页面统一结构。"""
-    return [
-        SearchHit(
-            text=document.page_content,
+    hits = []
+    seen_parents = set()
+    for document, score in documents_with_scores:
+        # 同一父段落的多个子切片只保留最高排名命中，增加参考资料多样性。
+        parent_key = (document.metadata.get("source"), document.metadata.get("parent_index", document.metadata.get("chunk_index", 0)))
+        if parent_key in seen_parents:
+            continue
+        seen_parents.add(parent_key)
+        hits.append(SearchHit(
+            text=str(document.metadata.get("parent_text") or document.page_content),
             vector_score=float(score),
             rerank_score=0.0,
             chunk_index=int(document.metadata.get("chunk_index", 0)),
@@ -353,9 +364,12 @@ def candidates_to_hits(documents_with_scores: list[tuple[Document, float]], limi
             category=str(document.metadata.get("category", "通用")),
             point_name=str(document.metadata.get("point_name", "unknown")),
             url=str(document.metadata.get("url", "")),
-        )
-        for document, score in documents_with_scores[:limit]
-    ]
+            matched_text=str(document.metadata.get("original_text") or document.page_content),
+            parent_index=int(document.metadata.get("parent_index", 0)),
+        ))
+        if len(hits) >= limit:
+            break
+    return hits
 
 
 # 定义第二阶段重排函数，并允许评估时取消最终数量限制。
@@ -395,24 +409,17 @@ def rerank_candidates(
         # 分数越高越相关，因此采用从高到低排序。
         reverse=True,
     )
-    # 正常问答时只保留最终 TOP_K；评估时传入 None 保留完整排名。
-    if limit is not None:
-        # 使用列表切片取得排序后的前 limit 项。
-        ranked_results = ranked_results[:limit]
-    # 输出重排后的数量、最高分和耗时。
-    logger.info(
-        "rerank completed | input=%d | output=%d | top_score=%.4f | elapsed_ms=%.1f",
-        len(documents_with_scores),
-        len(ranked_results),
-        float(ranked_results[0][1]),
-        (perf_counter() - started) * 1000,
-    )
     # 将内部元组结构转换成更清晰的 SearchHit 列表。
-    return [
-        # 为每个重排结果创建一个 SearchHit。
-        SearchHit(
+    hits = []
+    seen_parents = set()
+    for (document, vector_score), rerank_score in ranked_results:
+        parent_key = (document.metadata.get("source"), document.metadata.get("parent_index", document.metadata.get("chunk_index", 0)))
+        if limit is not None and parent_key in seen_parents:
+            continue
+        seen_parents.add(parent_key)
+        hits.append(SearchHit(
             # 保存 LangChain Document 正文。
-            text=document.page_content,
+            text=str(document.metadata.get("parent_text") or document.page_content),
             # 将 Qdrant 分数统一转换成 Python float。
             vector_score=float(vector_score),
             # 将 ONNX 模型输出统一转换成 Python float。
@@ -426,10 +433,20 @@ def rerank_candidates(
             # 从 metadata 读取可读 Point 名称。
             point_name=str(document.metadata.get("point_name", "unknown")),
             url=str(document.metadata.get("url", "")),
-        )
-        # 对排序结果做嵌套解包，获得 Document、两个分数。
-        for (document, vector_score), rerank_score in ranked_results
-    ]
+            matched_text=str(document.metadata.get("original_text") or document.page_content),
+            parent_index=int(document.metadata.get("parent_index", 0)),
+        ))
+        if limit is not None and len(hits) >= limit:
+            break
+    # 输出去重并截断后的实际结果数量、最高分和耗时。
+    logger.info(
+        "rerank completed | input=%d | output=%d | top_score=%.4f | elapsed_ms=%.1f",
+        len(documents_with_scores),
+        len(hits),
+        float(ranked_results[0][1]),
+        (perf_counter() - started) * 1000,
+    )
+    return hits
 
 
 # 定义完整检索函数，串联 Qdrant 召回和 Cross-Encoder 重排。
